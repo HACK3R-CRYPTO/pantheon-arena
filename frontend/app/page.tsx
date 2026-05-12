@@ -166,6 +166,11 @@ export default function Home() {
           </div>
         </div>
 
+        {/* ── WAR NARRATIVE TICKER ─────────────────────────── */}
+        {feed.length > 0 && gods.length > 0 && (
+          <WarNarrative gods={gods} feed={feed} battles={battles} />
+        )}
+
         {/* ── GRID ───────────────────────────────────────────── */}
         <div style={{ maxWidth:1100, margin:"0 auto", padding:"40px 20px", display:"grid",
           gridTemplateColumns:"minmax(0,1.4fr) minmax(0,1fr)", gap:24 }}>
@@ -201,6 +206,55 @@ export default function Home() {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function WarNarrative({ gods, feed, battles }: { gods: God[]; feed: Battle[]; battles: number }) {
+  const leader  = gods[0];
+  const last    = feed[0];
+  const lastWin = last ? godByAddr(last.winner) : null;
+  const lastLos = last ? godByAddr(last.loser)  : null;
+
+  // Find the god with most wins on a streak
+  const hotGod  = gods.find(g => g.wins >= 2 && g.wins > g.losses);
+  // Find who has lost the most
+  const revenge = gods.find(g => g.losses > g.wins && g.losses >= 2);
+
+  const lines: string[] = [];
+
+  if (leader) lines.push(`👑 ${leader.name} dominates with ${leader.powerScore.toLocaleString()} power — ${leader.wins}W/${leader.losses}L.`);
+  if (lastWin && lastLos) lines.push(`⚔️ Last battle: ${lastWin.name} defeated ${lastLos.name}. The ${lastWin.name === "CHAOS" ? "void" : lastWin.name.toLowerCase()} grows stronger.`);
+  if (hotGod && hotGod.name !== leader?.name) lines.push(`🔥 ${hotGod.name} is on a run — ${hotGod.wins} wins. A challenger to the throne emerges.`);
+  if (revenge) lines.push(`💀 ${revenge.name} has fallen ${revenge.losses} times. Something is about to change.`);
+  if (battles >= 10) lines.push(`⚡ ${battles} battles resolved with zero human intervention. The world runs itself.`);
+
+  if (lines.length === 0) return null;
+
+  return (
+    <div style={{
+      borderTop:"1px solid rgba(109,40,217,0.15)",
+      borderBottom:"1px solid rgba(109,40,217,0.15)",
+      background:"rgba(109,40,217,0.06)",
+      padding:"14px 0", overflow:"hidden",
+    }}>
+      <div style={{
+        maxWidth:1100, margin:"0 auto", padding:"0 24px",
+        display:"flex", gap:40, alignItems:"center",
+        overflowX:"auto",
+      }}>
+        <span style={{ fontSize:9, fontWeight:800, letterSpacing:"0.18em", color:"rgba(168,85,247,0.7)", shrink:0, flexShrink:0 }}>
+          WAR REPORT
+        </span>
+        {lines.map((line, i) => (
+          <span key={i} style={{
+            fontSize:12, color:"rgba(200,180,255,0.75)", fontWeight:600,
+            whiteSpace:"nowrap", flexShrink:0,
+          }}>
+            {line}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function FloatingIcons() {
   const icons = [

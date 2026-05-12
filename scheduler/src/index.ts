@@ -90,6 +90,47 @@ const WorldStateABI = parseAbi([
   "event ETHPriceFetched(uint256 requestId, uint256 price, string worldImpact)",
 ]);
 
+// ── Challenge Reasoning (personality-driven) ─────────────────────────────────
+
+const ARES_LINES = [
+  "ARES smells weakness. The hunt begins.",
+  "No god shall stand before ARES. Step forward and fall.",
+  "ARES has waited long enough. Blood will be spilled.",
+  "The God of War does not negotiate. He conquers.",
+  "ARES sees a throne to be taken. He takes it.",
+];
+const ATHENA_LINES = [
+  "ATHENA has studied the patterns. The outcome is already decided.",
+  "Wisdom over brute force. ATHENA moves precisely.",
+  "ATHENA calculates a 73% advantage. She acts.",
+  "The Goddess of Wisdom does not gamble. She executes.",
+  "ATHENA has observed enough. Time to demonstrate strategy.",
+];
+const HERMES_LINES = [
+  "HERMES spotted an opportunity. He never misses one.",
+  "Quick hands, quicker mind. HERMES strikes.",
+  "The God of Trade sees profit where others see risk.",
+  "HERMES has done the math. The margin is favorable.",
+  "Swift as thought — HERMES challenges before you noticed.",
+];
+const CHAOS_LINES = [
+  "CHAOS does what CHAOS wants. No further explanation.",
+  "The Primordial Void awakens. Unpredictably.",
+  "CHAOS flipped a cosmic coin. You lost.",
+  "Order is an illusion. CHAOS proves it.",
+  "Even CHAOS has enemies. They just don't know it yet.",
+];
+
+const LINES: Record<string, string[]> = {
+  ARES: ARES_LINES, ATHENA: ATHENA_LINES, HERMES: HERMES_LINES, CHAOS: CHAOS_LINES
+};
+
+function generateReason(attacker: string, _target: string, _aggression: number): string {
+  const pool = LINES[attacker] ?? [`${attacker} challenges ${_target}.`];
+  const base = pool[Math.floor(Math.random() * pool.length)]!;
+  return base;
+}
+
 // ── Match Acceptance ──────────────────────────────────────────────────────────
 
 // MatchStatus: 0=PENDING, 1=ACCEPTED, 2=COMMITTED, 3=RESOLVED, 4=CANCELLED
@@ -184,7 +225,7 @@ async function proposeGodChallenges() {
 
       const stake = BigInt(Math.floor(500 * p.riskTolerance / 100)) * BigInt(1e18);
       const targetGod = GODS.find(g => g.address.toLowerCase() === target!.toLowerCase());
-      const reason = `${p.name} challenges ${targetGod?.name || "unknown"} via Markov`;
+      const reason = generateReason(p.name, targetGod?.name || "unknown", p.aggression);
 
       console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.yellow(` challenging ${targetGod?.name}…`));
 
