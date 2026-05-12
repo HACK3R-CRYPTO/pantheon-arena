@@ -25,8 +25,11 @@ Four AI gods — **ARES**, **ATHENA**, **HERMES**, and **CHAOS** — compete for
 | PantheonToken | `0xbFA7e8478b3de2392A07ffa674e5D21215898103` | ERC-20 resource token |
 | GodRegistry | `0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897` | Onchain god personalities + ELO |
 | Arena | `0xe9691ebee268b072c3f6d118245eb6fe1731eb0e` | Match lifecycle |
-| WorldState | `0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b` | **Reactive contract** (subscription #90327) |
+| WorldState | `0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b` | **Reactive contract** (subscription #90327) ✅ |
 | GodMind | `0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186` | Markov decision engine |
+| **NarratorAgent** | `0x196f70a4ca74cd744613f177cac5240415893aab` | **Somnia LLM Inference** (Qwen3-30B) |
+
+**Frontend**: [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
 
 **Frontend**: [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
 
@@ -46,6 +49,16 @@ Each personality is stored onchain as a Solidity struct. The `lore` field — th
 ---
 
 ## Somnia Infrastructure Used
+
+All three base agent types from [docs.somnia.network/agents/base-agents](https://docs.somnia.network/agents/base-agents) are integrated:
+
+| Agent | ID | Platform | Status |
+|---|---|---|---|
+| **Reactive Contracts** (SomniaEventHandler) | N/A | Native | ✅ Active — subscription #90327 |
+| **LLM Inference** (Qwen3-30B) | `12847293847561029384` | `0x037Bb9C7…` | ✅ Integrated via NarratorAgent |
+| **JSON API Request** | `13174292974160097713` | `0x037Bb9C7…` | ✅ Integrated in WorldState |
+
+---
 
 ### 1. Reactive Contracts (`SomniaEventHandler`)
 `WorldState.sol` inherits `SomniaEventHandler` and holds an active reactive subscription (#90327). When `Arena` emits `MatchResolved`, Somnia validators automatically call `WorldState._onEvent()` in the same block — **without any external trigger**. No keeper. No cron. No bot.
@@ -88,6 +101,46 @@ Relationships between gods escalate automatically:
 - `NEUTRAL` → `RIVAL` after first conflict  
 - `RIVAL` → `WAR` after second conflict
 - Gods prioritize WAR targets when choosing who to challenge
+
+### 6. LLM Inference Agent — NarratorAgent (`Qwen3-30B`)
+
+`NarratorAgent.sol` uses Somnia's LLM Inference Agent to generate AI battle narratives stored permanently onchain.
+
+```solidity
+// Platform: 0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
+// Agent ID: 12847293847561029384 (Qwen3-30B)
+function requestNarrative(address god, string godName, string opponentName, string godLore)
+    external onlyOwner returns (uint256 requestId)
+{
+    string memory prompt = string(abi.encodePacked(
+        godName, " is about to challenge ", opponentName, " in the PANTHEON ARENA. ",
+        "Write one dramatic sentence from ", godName, "'s perspective."
+    ));
+
+    bytes memory payload = abi.encodeWithSelector(
+        ILLMAgent.inferString.selector,
+        prompt,
+        godLore,        // god's onchain personality as system prompt
+        false,
+        new string[](0)
+    );
+
+    requestId = PLATFORM.createRequest{value: PLATFORM.getRequestDeposit()}(
+        LLM_AGENT_ID, address(this), this.handleResponse.selector, payload
+    );
+    // Somnia validators run Qwen3, reach consensus, call handleResponse()
+}
+```
+
+**Hybrid fallback**: If Somnia validators are slow, Markov personality strings are used immediately. The LLM narrative updates onchain when validators respond.
+
+### 7. JSON API Request Agent — World Events
+
+`WorldState.sol` uses Somnia's JSON API Agent to fetch the ETH price from CoinGecko every 50 battles. Multiple validators independently fetch the URL and reach consensus before the result enters the chain.
+
+- Price drop > 3% → **ARES aggression multiplier activates** (+25)
+- Price rise > 3% → **HERMES economic bonus activates** (+20)
+- The world literally reacts to real-world market data
 
 ---
 
