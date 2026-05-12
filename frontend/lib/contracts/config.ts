@@ -18,7 +18,7 @@ export const CONTRACTS = {
   GodRegistry: "0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897" as `0x${string}`,
   Arena: "0xe9691ebee268b072c3f6d118245eb6fe1731eb0e" as `0x${string}`,
   WorldState: "0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b" as `0x${string}`,
-  GodMind: "0xbd8eeb5362a8b20455efcbb9800f6dfa04fd8527" as `0x${string}`,
+  GodMind: "0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186" as `0x${string}`,
 } as const;
 
 // ── God wallet addresses ─────────────────────────────────────────────────────
