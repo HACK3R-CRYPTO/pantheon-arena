@@ -113,6 +113,8 @@ export const ArenaABI = [
           { name: "opponentCommit", type: "bytes32" },
           { name: "challengerMove", type: "uint8" },
           { name: "opponentMove", type: "uint8" },
+          { name: "challengerRevealed", type: "bool" },
+          { name: "opponentRevealed", type: "bool" },
           { name: "winner", type: "address" },
           { name: "createdBlock", type: "uint256" },
           { name: "decisionReason", type: "string" },
