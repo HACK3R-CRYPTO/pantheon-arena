@@ -96,14 +96,22 @@ export default function GodProfile() {
               {/* Top row */}
               <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:20 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-                  {/* Big portrait */}
+                  {/* Big portrait — replace with AI image from /public/gods/{name}.png */}
                   <div style={{
-                    width:72, height:72, borderRadius:20, flexShrink:0,
+                    width:88, height:88, borderRadius:22, flexShrink:0,
                     background:"rgba(0,0,0,0.35)", border:"2.5px solid rgba(255,255,255,0.45)",
                     display:"flex", alignItems:"center", justifyContent:"center",
-                    fontSize:34, boxShadow:"inset 0 3px 10px rgba(0,0,0,0.4)",
+                    fontSize:38, boxShadow:`0 0 32px ${color}50, inset 0 3px 10px rgba(0,0,0,0.4)`,
+                    overflow:"hidden", position:"relative",
                   }}>
-                    {GOD_ICON[name] ?? "⚡"}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/gods/${name.toLowerCase()}.png`}
+                      alt={name}
+                      style={{ width:"100%", height:"100%", objectFit:"cover", position:"absolute", inset:0 }}
+                      onError={e => { (e.target as HTMLImageElement).style.display="none"; }}
+                    />
+                    <span style={{ position:"relative", zIndex:1, fontSize:38 }}>{GOD_ICON[name] ?? "⚡"}</span>
                   </div>
                   <div>
                     <div style={{ fontWeight:900, fontSize:32, color:"white", lineHeight:1, textShadow:"0 3px 8px rgba(0,0,0,0.5)", marginBottom:4 }}>

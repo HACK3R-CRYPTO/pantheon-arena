@@ -25,6 +25,13 @@ interface Summary { currentEra: bigint; battles: bigint; }
 const EMOJIS     = ["✊", "📄", "✂️"];
 const MOVE_NAMES = ["Rock", "Paper", "Scissors"];
 const GOD_ICON: Record<string, string> = { ARES:"⚔️", ATHENA:"🦉", HERMES:"⚡", CHAOS:"🌀" };
+// God portrait images — drop PNG files in /public/gods/ after generating with Bing
+const GOD_IMG: Record<string, string> = {
+  ARES:   "/gods/ares.png",
+  ATHENA: "/gods/athena.png",
+  HERMES: "/gods/hermes.png",
+  CHAOS:  "/gods/chaos.png",
+};
 
 // God color → wall/face/glow mapping (GameArenaCelo style)
 const GOD_THEME: Record<string, { wall: string; face: string; glow: string }> = {
@@ -376,14 +383,29 @@ function GodCard({ god, rank, gods, rel }: { god: God; rank: number; gods: God[]
             {/* Header */}
             <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:12 }}>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                {/* Portrait */}
+                {/* Portrait — uses AI-generated image if available, falls back to emoji */}
                 <div style={{
-                  width:48, height:48, borderRadius:14, flexShrink:0,
-                  background:"rgba(0,0,0,0.3)", border:"2px solid rgba(255,255,255,0.4)",
+                  width:56, height:56, borderRadius:14, flexShrink:0,
+                  background:"rgba(0,0,0,0.3)", border:"2.5px solid rgba(255,255,255,0.5)",
                   display:"flex", alignItems:"center", justifyContent:"center",
-                  fontSize:24, boxShadow:"inset 0 2px 8px rgba(0,0,0,0.4)",
+                  fontSize:26, boxShadow:`0 0 20px ${god.color}50, inset 0 2px 8px rgba(0,0,0,0.4)`,
+                  overflow:"hidden", position:"relative",
                 }}>
-                  {GOD_ICON[god.name] ?? "⚡"}
+                  {GOD_IMG[god.name] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={GOD_IMG[god.name]}
+                      alt={god.name}
+                      style={{ width:"100%", height:"100%", objectFit:"cover" }}
+                      onError={e => { (e.target as HTMLImageElement).style.display="none"; }}
+                    />
+                  ) : null}
+                  <span style={{
+                    position:"absolute", inset:0, display:"flex",
+                    alignItems:"center", justifyContent:"center", fontSize:26
+                  }}>
+                    {GOD_ICON[god.name] ?? "⚡"}
+                  </span>
                 </div>
                 <div>
                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
