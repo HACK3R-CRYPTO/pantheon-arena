@@ -27,10 +27,9 @@ contract Deploy is Script {
     // Discovered by reading live event logs from the platform contract
     uint256 constant LLM_AGENT_ID = 12847293847561029384;
 
-    // JSON API agentId — set to 0 to disable until confirmed
-    // Run: cast call $PLATFORM "createRequest(uint256,...)" with candidate IDs to find it
-    // Or check https://agents.testnet.somnia.network for the JSON API agent ID
-    uint256 constant JSON_API_AGENT_ID = 0; // TODO: update with real JSON API agent ID
+    // JSON API agentId — confirmed from https://agents.testnet.somnia.network/agent/13174292974160097713
+    // Deposit: 0.12 STT per call (0.01 floor + 0.03 headroom) × 3 runners
+    uint256 constant JSON_API_AGENT_ID = 13174292974160097713;
 
     // ── God wallet addresses ───────────────────────────────────────────────────
     // Replace with your actual god wallets (generated with: cast wallet new)
