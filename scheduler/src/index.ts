@@ -106,6 +106,7 @@ async function runDecisionRound() {
         functionName: "executeDecision",
         args: [god.address],
         account,
+        gas: BigInt(50_000_000), // Somnia charges much more gas than standard EVM
       });
 
       console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.gray(` → ${hash.slice(0, 14)}…`));

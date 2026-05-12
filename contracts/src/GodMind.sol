@@ -12,7 +12,7 @@ contract GodMind is IAgentRequesterHandler {
 
     IAgentRequester public agentPlatform;
     uint256 public llmAgentId;
-    uint256 public constant LLM_TOTAL_COST = 0.24 ether; // 0.07 x 3 + 0.03 reserve
+    uint256 public constant LLM_TOTAL_COST = 0.03 ether; // platform getRequestDeposit() on Somnia testnet
 
     GodRegistry public registry;
     Arena public arena;
@@ -132,15 +132,19 @@ contract GodMind is IAgentRequesterHandler {
             false
         );
 
-        uint256 requestId = agentPlatform.createRequest{value: LLM_TOTAL_COST}(
+        try agentPlatform.createRequest{value: LLM_TOTAL_COST}(
             llmAgentId,
             address(this),
             this.handleResponse.selector,
             payload
-        );
-
-        pendingRequests[requestId] = PendingRequest(god, opp, stake, matchId, markovMove);
-        emit LLMDecisionRequested(god, requestId, prompt);
+        ) returns (uint256 requestId) {
+            pendingRequests[requestId] = PendingRequest(god, opp, stake, matchId, markovMove);
+            emit LLMDecisionRequested(god, requestId, prompt);
+        } catch {
+            // LLM agent unavailable — use Markov directly
+            emit MarkovFallback(god, "LLM agent unavailable");
+            _commitMove(god, matchId, markovMove, opp, stake, "Markov (LLM unavailable)", false);
+        }
     }
 
     function _movePrompt(
@@ -253,15 +257,19 @@ contract GodMind is IAgentRequesterHandler {
             new string[](0)
         );
 
-        uint256 requestId = agentPlatform.createRequest{value: LLM_TOTAL_COST}(
+        try agentPlatform.createRequest{value: LLM_TOTAL_COST}(
             llmAgentId,
             address(this),
             this.handleResponse.selector,
             payload
-        );
-
-        pendingRequests[requestId] = PendingRequest(god, target, stake, 0, p.favoredMove);
-        emit LLMDecisionRequested(god, requestId, prompt);
+        ) returns (uint256 requestId) {
+            pendingRequests[requestId] = PendingRequest(god, target, stake, 0, p.favoredMove);
+            emit LLMDecisionRequested(god, requestId, prompt);
+        } catch {
+            // LLM agent unavailable — challenge anyway with Markov reasoning
+            emit MarkovFallback(god, "LLM agent unavailable");
+            _executeChallenge(god, target, stake, string(abi.encodePacked(p.name, " challenges via Markov.")));
+        }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

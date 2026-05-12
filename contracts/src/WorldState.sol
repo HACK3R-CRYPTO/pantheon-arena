@@ -48,7 +48,7 @@ contract WorldState is SomniaEventHandler, IAgentRequesterHandler {
     // ── Somnia JSON API Agent ──────────────────────────────────────────────────
     IAgentRequester public agentPlatform;
     uint256 public jsonApiAgentId;
-    uint256 public constant JSON_API_COST = 0.12 ether; // (0.01 floor + 0.03 headroom) × 3 runners
+    uint256 public constant JSON_API_COST = 0.03 ether; // platform getRequestDeposit() on Somnia testnet
     uint256 public pendingPriceRequestId;   // Track the live JSON API request
     uint256 public lastFetchedEthPrice;     // Last ETH price from Somnia JSON API (8 decimals)
     uint256 public lastPriceFetchBattle;    // Battle number when we last fetched
