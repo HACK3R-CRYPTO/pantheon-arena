@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/.env
+
+# Next.js
+frontend/.next/
+frontend/.env
+frontend/.env.local
+
+# Scheduler
+scheduler/.env
+
+# OS
+.DS_Store
+*.log
