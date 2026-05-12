@@ -16,8 +16,8 @@ export const somniaTestnet = defineChain({
 export const CONTRACTS = {
   PantheonToken: "0xbFA7e8478b3de2392A07ffa674e5D21215898103" as `0x${string}`,
   GodRegistry: "0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897" as `0x${string}`,
-  Arena: "0xfF6111F3dB479286FF59875EA8fB851Eac6b18f3" as `0x${string}`,
-  WorldState: "0x11Dd65186aD02Ba9d91Ab7EFc16cfDBB9Ec28774" as `0x${string}`,
+  Arena: "0xe9691ebee268b072c3f6d118245eb6fe1731eb0e" as `0x${string}`,
+  WorldState: "0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b" as `0x${string}`,
   GodMind: "0x697c4fa37d25fefaec317dc4c9f4282f7471200f" as `0x${string}`,
 } as const;
 

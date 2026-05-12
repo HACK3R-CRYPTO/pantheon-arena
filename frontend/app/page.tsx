@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { publicClient } from "@/lib/contracts/client";
 import { CONTRACTS, GOD_LIST } from "@/lib/contracts/config";
-import { GodRegistryABI, WorldStateABI, GodMindABI, PantheonTokenABI } from "@/lib/contracts/abis";
+import { GodRegistryABI, ArenaABI, WorldStateABI, GodMindABI, PantheonTokenABI } from "@/lib/contracts/abis";
 import { formatEther } from "viem";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -94,9 +94,9 @@ export default function WorldView() {
           functionName: "getAllGodStates",
         }),
         publicClient.readContract({
-          address: CONTRACTS.WorldState,
-          abi: WorldStateABI,
-          functionName: "getBattleFeed",
+          address: CONTRACTS.Arena,
+          abi: ArenaABI,
+          functionName: "getRecentMatches",
           args: [20n],
         }),
         publicClient.readContract({
@@ -160,9 +160,26 @@ export default function WorldView() {
       godStates.sort((a, b) => b.powerScore - a.powerScore);
 
       setGods(godStates);
-      setBattleFeed(feedData as BattleRecord[]);
+      // Map Arena Match structs to BattleRecord format (Arena returns resolved matches)
+      const matches = (feedData as unknown as any[]).filter(m => m.status === 3); // RESOLVED only
+      const mappedFeed: BattleRecord[] = matches.map(m => ({
+        matchId: m.id,
+        winner: m.winner,
+        loser: m.winner === m.challenger ? m.opponent : m.challenger,
+        stake: m.stake,
+        winnerMove: m.winner === m.challenger ? m.challengerMove : m.opponentMove,
+        loserMove: m.winner === m.challenger ? m.opponentMove : m.challengerMove,
+        blockNumber: m.createdBlock,
+        decisionReason: m.decisionReason,
+      }));
+      setBattleFeed(mappedFeed);
       setWorldEvents(eventsData as WorldEvent[]);
-      setSummary(summaryData as unknown as WorldSummary);
+      // viem returns multi-output functions as a tuple array [era, battles, feedSize, count]
+      const sd = summaryData as any;
+      const summaryObj: WorldSummary = Array.isArray(sd)
+        ? { currentEra: sd[0], battles: sd[1], feedSize: sd[2], worldEventCount: sd[3] }
+        : sd;
+      setSummary(summaryObj);
       setLastUpdate(new Date());
       setLoading(false);
     } catch (err) {
@@ -265,7 +282,7 @@ export default function WorldView() {
                     </div>
                   ) : (
                     battleFeed.slice(0, 15).map((b, i) => (
-                      <BattleFeedItem key={`${b.matchId}-${i}`} battle={b} />
+                      <BattleFeedItem key={`${b.matchId?.toString() ?? i}-${i}`} battle={b} />
                     ))
                   )}
                 </div>
@@ -472,7 +489,7 @@ function BattleFeedItem({ battle }: { battle: BattleRecord }) {
           {battle.decisionReason}
         </div>
       )}
-      <div className="text-xs text-[var(--muted)] mt-1">Block #{battle.blockNumber.toString()}</div>
+      <div className="text-xs text-[var(--muted)] mt-1">Block #{battle.blockNumber?.toString() ?? "?"}</div>
     </div>
   );
 }
@@ -499,7 +516,7 @@ function WorldEventItem({ event }: { event: WorldEvent }) {
               )}
             </p>
           )}
-          <p className="text-xs text-[var(--muted)] mt-1">Block #{event.blockNumber.toString()}</p>
+          <p className="text-xs text-[var(--muted)] mt-1">Block #{event.blockNumber?.toString() ?? "?"}</p>
         </div>
       </div>
     </div>

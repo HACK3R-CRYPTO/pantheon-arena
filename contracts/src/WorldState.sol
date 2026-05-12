@@ -136,9 +136,11 @@ contract WorldState is SomniaEventHandler, IAgentRequesterHandler {
 
         if (eventTopics.length < 4) return;
 
-        address winner = address(uint160(uint256(eventTopics[1])));
-        address loser  = address(uint160(uint256(eventTopics[2])));
-        uint256 matchId = uint256(eventTopics[0]); // first indexed param
+        // Somnia reactive callback: eventTopics[0] = event signature (topic0)
+        // eventTopics[1] = matchId (first indexed), eventTopics[2] = winner, eventTopics[3] = loser
+        uint256 matchId = uint256(eventTopics[1]);
+        address winner  = address(uint160(uint256(eventTopics[2])));
+        address loser   = address(uint160(uint256(eventTopics[3])));
 
         // Decode non-indexed data: (uint256 stake, uint8 winnerMove, uint8 loserMove, string reason)
         (uint256 stake, uint8 winnerMove, uint8 loserMove, string memory reason) =

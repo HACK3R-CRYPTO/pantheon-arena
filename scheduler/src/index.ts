@@ -74,6 +74,8 @@ const GodMindABI = parseAbi([
 
 const ArenaABI = parseAbi([
   "function matchCounter() external view returns (uint256)",
+  "function getMatch(uint256 matchId) external view returns ((uint256,address,address,uint256,uint8,uint8,bytes32,bytes32,uint8,uint8,address,uint256,string))",
+  "function acceptChallenge(address opponent, uint256 matchId) external",
   "event MatchResolved(uint256 indexed matchId, address indexed winner, address indexed loser, uint256 stake, uint8 winnerMove, uint8 loserMove, string decisionReason)",
   "event MatchProposed(uint256 indexed matchId, address indexed challenger, address indexed opponent, uint256 stake)",
 ]);
@@ -85,6 +87,55 @@ const WorldStateABI = parseAbi([
   "event ETHPriceFetched(uint256 requestId, uint256 price, string worldImpact)",
 ]);
 
+// ── Match Acceptance ──────────────────────────────────────────────────────────
+
+// MatchStatus: 0=PENDING, 1=ACCEPTED, 2=COMMITTED, 3=RESOLVED, 4=CANCELLED
+async function processPendingMatches() {
+  try {
+    const count = await publicClient.readContract({
+      address: CONTRACTS.Arena,
+      abi: ArenaABI,
+      functionName: "matchCounter",
+    }) as bigint;
+
+    if (count === 0n) return;
+
+    for (let i = 1n; i <= count; i++) {
+      const raw = await publicClient.readContract({
+        address: CONTRACTS.Arena,
+        abi: ArenaABI,
+        functionName: "getMatch",
+        args: [i],
+      }) as unknown as any[];
+
+      // raw = [id, challenger, opponent, stake, gameType, status, ...]
+      const status = Number(raw[5]);
+      if (status !== 0) continue; // only PENDING
+
+      const opponent = raw[2] as `0x${string}`;
+      const god = GODS.find(g => g.address.toLowerCase() === opponent.toLowerCase());
+      if (!god) continue;
+
+      console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.yellow(` accepting challenge #${i}…`));
+
+      try {
+        const hash = await walletClient.writeContract({
+          address: CONTRACTS.Arena,
+          abi: ArenaABI,
+          functionName: "acceptChallenge",
+          args: [opponent, i],
+          account,
+          gas: BigInt(10_000_000),
+        });
+        console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.green(` accepted → ${hash.slice(0, 14)}…`));
+        await sleep(3000);
+      } catch (e: any) {
+        console.log(chalk.gray(`[${god.name}] accept failed: ${(e?.shortMessage || e?.message || "").slice(0, 80)}`));
+      }
+    }
+  } catch {}
+}
+
 // ── Decision Loop ─────────────────────────────────────────────────────────────
 
 const INTERVAL_MS = 15_000; // 15s between decision rounds
@@ -93,6 +144,9 @@ let busy = false;
 async function runDecisionRound() {
   if (busy) return;
   busy = true;
+
+  // First: accept any pending challenges
+  await processPendingMatches();
 
   for (let i = 0; i < GODS.length; i++) {
     const god = GODS[i]!;

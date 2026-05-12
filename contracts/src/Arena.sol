@@ -22,6 +22,8 @@ contract Arena {
         bytes32 opponentCommit;
         uint8 challengerMove;   // 0=Rock 1=Paper 2=Scissors (revealed)
         uint8 opponentMove;
+        bool challengerRevealed;  // true once challenger calls revealMove
+        bool opponentRevealed;    // true once opponent calls revealMove
         address winner;
         uint256 createdBlock;
         string decisionReason;  // LLM reasoning stored onchain (or Markov label)
@@ -129,6 +131,8 @@ contract Arena {
             opponentCommit: bytes32(0),
             challengerMove: 0,
             opponentMove: 0,
+            challengerRevealed: false,
+            opponentRevealed: false,
             winner: address(0),
             createdBlock: block.number,
             decisionReason: decisionReason
@@ -195,23 +199,17 @@ contract Arena {
         if (god == m.challenger) {
             if (m.challengerCommit != expected) revert CommitMismatch();
             m.challengerMove = move;
+            m.challengerRevealed = true;
         } else if (god == m.opponent) {
             if (m.opponentCommit != expected) revert CommitMismatch();
             m.opponentMove = move;
+            m.opponentRevealed = true;
         } else {
             revert Unauthorized();
         }
 
-        // Both revealed — resolve immediately
-        if (m.challengerCommit != bytes32(0) && m.opponentCommit != bytes32(0)) {
-            bool challengerRevealed = m.challengerMove != 0 || m.challengerCommit == keccak256(abi.encode(uint8(0), secret));
-            bool opponentRevealed = m.opponentMove != 0 || m.opponentCommit == keccak256(abi.encode(uint8(0), secret));
-
-            // Check if both players have revealed by checking if their stored move matches their commit
-            // We resolve when the second player reveals
-            if (god == m.challenger && _hasRevealed(m.opponent, m.opponentMove, m.opponentCommit) == false) return;
-            if (god == m.opponent && _hasRevealed(m.challenger, m.challengerMove, m.challengerCommit) == false) return;
-
+        // Resolve only when BOTH have actually revealed
+        if (m.challengerRevealed && m.opponentRevealed) {
             _resolveMatch(matchId);
         }
     }
@@ -311,11 +309,4 @@ contract Arena {
         return 2;
     }
 
-    function _hasRevealed(address, uint8 move, bytes32 commit) internal pure returns (bool) {
-        // A god has revealed if their commit is non-zero (set during commit phase)
-        // and their move slot has been written. Since move=0 is valid (Rock),
-        // we track reveals separately via the commit being zeroed after reveal.
-        // Simplified: both reveal in same tx is handled by caller checking both slots.
-        return commit != bytes32(0);
-    }
 }

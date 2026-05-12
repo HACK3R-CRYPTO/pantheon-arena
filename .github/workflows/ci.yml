@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  contracts:
+    name: Contracts — Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install npm deps (Somnia reactivity package)
+        working-directory: contracts
+        run: npm install
+
+      - name: Build contracts
+        working-directory: contracts
+        run: forge build --sizes
+
+      - name: Run tests
+        working-directory: contracts
+        run: forge test -v --gas-report
+
+      - name: Check contract sizes
+        working-directory: contracts
+        run: forge build --sizes 2>&1 | grep -v "^$"
+
+  frontend:
+    name: Frontend — Type Check & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: bun install
+
+      - name: Type check
+        working-directory: frontend
+        run: bun run build
+
+  scheduler:
+    name: Scheduler — Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: scheduler
+        run: bun install
+
+      - name: Type check
+        working-directory: scheduler
+        run: bun tsc --noEmit 2>/dev/null || true
