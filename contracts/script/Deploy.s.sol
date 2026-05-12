@@ -33,10 +33,10 @@ contract Deploy is Script {
 
     // ── God wallet addresses ───────────────────────────────────────────────────
     // Replace with your actual god wallets (generated with: cast wallet new)
-    address constant ARES_ADDR    = 0x1111111111111111111111111111111111111111;
-    address constant ATHENA_ADDR  = 0x2222222222222222222222222222222222222222;
-    address constant HERMES_ADDR  = 0x3333333333333333333333333333333333333333;
-    address constant CHAOS_ADDR   = 0x4444444444444444444444444444444444444444;
+    address constant ARES_ADDR    = 0xF2D11EA0375971Bd3edd6E49330A20c56F7B844F;
+    address constant ATHENA_ADDR  = 0x5678D64DE049530Dee4c1a16FF749D22ac2EE301;
+    address constant HERMES_ADDR  = 0x5B407b88d29503929b7d0A0B4A2aAbFEb5B2EC1D;
+    address constant CHAOS_ADDR   = 0x874e20598A4EF4D3Fbab117d1b175Ff1CB5F57bE;
 
     uint256 constant INITIAL_PHN = 10_000 * 1e18;
 
