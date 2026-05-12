@@ -5,6 +5,7 @@ import { publicClient } from "@/lib/contracts/client";
 import { CONTRACTS, GOD_LIST } from "@/lib/contracts/config";
 import { GodRegistryABI, ArenaABI, WorldStateABI, GodMindABI, PantheonTokenABI } from "@/lib/contracts/abis";
 import { formatEther } from "viem";
+import Link from "next/link";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,12 +17,11 @@ interface GodState {
   aggression: number;
   riskTolerance: number;
   adaptability: number;
-  favoredMove: number;
   wins: number;
   losses: number;
   powerScore: number;
   balance: bigint;
-  lastDecision?: string;
+  active: boolean;
 }
 
 interface BattleRecord {
@@ -35,134 +35,87 @@ interface BattleRecord {
   decisionReason: string;
 }
 
-interface WorldEvent {
-  blockNumber: bigint;
-  description: string;
-  affectedGod: `0x${string}`;
-  aggressionModifier: number;
-  eventType: number;
-}
-
-interface WorldSummary {
-  currentEra: bigint;
-  battles: bigint;
-  feedSize: bigint;
-  worldEventCount: bigint;
-}
+interface WorldSummary { currentEra: bigint; battles: bigint; feedSize: bigint; worldEventCount: bigint; }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const MOVES = ["✊ Rock", "📄 Paper", "✂️ Scissors"];
-const RELATIONS = ["Neutral", "Allied", "Rival", "WAR ⚔️"];
-const RELATION_CLASSES = ["rel-neutral", "rel-allied", "rel-rival", "rel-war"];
+const MOVES = ["✊", "📄", "✂️"];
+const MOVE_NAMES = ["Rock", "Paper", "Scissors"];
+const REL = ["·", "ALLY", "RIVAL", "WAR ⚔️"];
+const REL_COLOR = ["text-gray-600", "text-emerald-400", "text-orange-400", "text-red-500"];
 
-function godByAddress(addr: string) {
-  return GOD_LIST.find(g => g.address.toLowerCase() === addr.toLowerCase());
+function godByAddr(addr: string) {
+  return GOD_LIST.find(g => g.address.toLowerCase() === addr?.toLowerCase());
 }
-
-function shortAddr(addr: string) {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
-function winRate(wins: number, losses: number) {
-  const total = wins + losses;
-  return total === 0 ? 0 : Math.round((wins / total) * 100);
-}
+function shortAddr(a: string) { return `${a?.slice(0,6)}…${a?.slice(-4)}`; }
+function winRate(w: number, l: number) { return w + l === 0 ? 0 : Math.round(w / (w + l) * 100); }
 
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function WorldView() {
   const [gods, setGods] = useState<GodState[]>([]);
-  const [battleFeed, setBattleFeed] = useState<BattleRecord[]>([]);
-  const [worldEvents, setWorldEvents] = useState<WorldEvent[]>([]);
+  const [feed, setFeed] = useState<BattleRecord[]>([]);
   const [summary, setSummary] = useState<WorldSummary | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [relations, setRelations] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(new Date());
 
   const fetchAll = useCallback(async () => {
     try {
-      // Check if contracts are deployed
       if (CONTRACTS.GodRegistry === "0x0000000000000000000000000000000000000000") {
-        setLoading(false);
-        return;
+        setLoading(false); return;
       }
 
-      const [godData, feedData, eventsData, summaryData] = await Promise.all([
-        publicClient.readContract({
-          address: CONTRACTS.GodRegistry,
-          abi: GodRegistryABI,
-          functionName: "getAllGodStates",
-        }),
-        publicClient.readContract({
-          address: CONTRACTS.Arena,
-          abi: ArenaABI,
-          functionName: "getRecentMatches",
-          args: [20n],
-        }),
-        publicClient.readContract({
-          address: CONTRACTS.WorldState,
-          abi: WorldStateABI,
-          functionName: "getWorldEvents",
-          args: [5n],
-        }),
-        publicClient.readContract({
-          address: CONTRACTS.WorldState,
-          abi: WorldStateABI,
-          functionName: "getWorldSummary",
-        }),
+      const [godData, matchData, summaryData] = await Promise.all([
+        publicClient.readContract({ address: CONTRACTS.GodRegistry, abi: GodRegistryABI, functionName: "getAllGodStates" }),
+        publicClient.readContract({ address: CONTRACTS.Arena, abi: ArenaABI, functionName: "getRecentMatches", args: [20n] }),
+        publicClient.readContract({ address: CONTRACTS.WorldState, abi: WorldStateABI, functionName: "getWorldSummary" }),
       ]);
 
       const [addresses, perks, allStats] = godData as any;
 
       const balances = await Promise.all(
         (addresses as `0x${string}`[]).map((addr: `0x${string}`) =>
-          publicClient.readContract({
-            address: CONTRACTS.PantheonToken,
-            abi: PantheonTokenABI,
-            functionName: "balanceOf",
-            args: [addr],
-          })
-        )
-      );
-
-      const decisions = await Promise.all(
-        (addresses as `0x${string}`[]).map((addr: `0x${string}`) =>
-          publicClient.readContract({
-            address: CONTRACTS.GodMind,
-            abi: GodMindABI,
-            functionName: "getDecisionHistory",
-            args: [addr, 1n],
-          }).catch(() => [])
+          publicClient.readContract({ address: CONTRACTS.PantheonToken, abi: PantheonTokenABI, functionName: "balanceOf", args: [addr] }).catch(() => 0n)
         )
       );
 
       const godStates: GodState[] = (addresses as `0x${string}`[]).map((addr: `0x${string}`, i: number) => {
-        const cfg = godByAddress(addr);
-        const decisionList = decisions[i] as any[];
+        const cfg = godByAddr(addr);
         return {
           address: addr,
-          name: perks[i].name || cfg?.name || shortAddr(addr),
-          epithet: perks[i].epithet || cfg?.epithet || "",
-          color: perks[i].color || cfg?.color || "#888",
-          aggression: perks[i].aggression,
-          riskTolerance: perks[i].riskTolerance,
-          adaptability: perks[i].adaptability,
-          favoredMove: perks[i].favoredMove,
-          wins: Number(allStats[i].wins),
-          losses: Number(allStats[i].losses),
-          powerScore: Number(allStats[i].powerScore),
+          name: perks[i]?.name || cfg?.name || shortAddr(addr),
+          epithet: perks[i]?.epithet || cfg?.epithet || "",
+          color: perks[i]?.color || cfg?.color || "#888",
+          aggression: Number(perks[i]?.aggression ?? 0),
+          riskTolerance: Number(perks[i]?.riskTolerance ?? 0),
+          adaptability: Number(perks[i]?.adaptability ?? 0),
+          wins: Number(allStats[i]?.wins ?? 0),
+          losses: Number(allStats[i]?.losses ?? 0),
+          powerScore: Number(allStats[i]?.powerScore ?? 1000),
           balance: balances[i] as bigint,
-          lastDecision: decisionList.length > 0 ? decisionList[0].reasoning : undefined,
+          active: Boolean(allStats[i]?.active),
         };
       });
-
-      // Sort by power score descending
       godStates.sort((a, b) => b.powerScore - a.powerScore);
 
-      setGods(godStates);
-      // Map Arena Match structs to BattleRecord format (Arena returns resolved matches)
-      const matches = (feedData as unknown as any[]).filter(m => m.status === 3); // RESOLVED only
-      const mappedFeed: BattleRecord[] = matches.map(m => ({
+      // Build relation map
+      const relMap: Record<string, number> = {};
+      for (let i = 0; i < addresses.length; i++) {
+        for (let j = i + 1; j < addresses.length; j++) {
+          const rel = await publicClient.readContract({
+            address: CONTRACTS.GodRegistry, abi: GodRegistryABI,
+            functionName: "getRelation", args: [addresses[i], addresses[j]],
+          }).catch(() => 0);
+          const key = `${addresses[i]}-${addresses[j]}`;
+          relMap[key] = Number(rel);
+        }
+      }
+
+      // Resolve battles from Arena
+      const rawMatches = matchData as unknown as any[];
+      const resolved = rawMatches.filter(m => Number(m.status) === 3);
+      const mappedFeed: BattleRecord[] = resolved.map(m => ({
         matchId: m.id,
         winner: m.winner,
         loser: m.winner === m.challenger ? m.opponent : m.challenger,
@@ -172,137 +125,108 @@ export default function WorldView() {
         blockNumber: m.createdBlock,
         decisionReason: m.decisionReason,
       }));
-      setBattleFeed(mappedFeed);
-      setWorldEvents(eventsData as WorldEvent[]);
-      // viem returns multi-output functions as a tuple array [era, battles, feedSize, count]
+
       const sd = summaryData as any;
-      const summaryObj: WorldSummary = Array.isArray(sd)
+      const sum: WorldSummary = Array.isArray(sd)
         ? { currentEra: sd[0], battles: sd[1], feedSize: sd[2], worldEventCount: sd[3] }
         : sd;
-      setSummary(summaryObj);
+
+      setGods(godStates);
+      setFeed(mappedFeed.reverse());
+      setRelations(relMap);
+      setSummary(sum);
       setLastUpdate(new Date());
       setLoading(false);
     } catch (err) {
-      console.error("Fetch error:", err);
+      console.error(err);
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchAll();
-    const interval = setInterval(fetchAll, 3000);
-    return () => clearInterval(interval);
+    const t = setInterval(fetchAll, 5000);
+    return () => clearInterval(t);
   }, [fetchAll]);
 
-  const maxPower = Math.max(...gods.map(g => g.powerScore), 1);
+  const maxPower = Math.max(...gods.map(g => g.powerScore), 1000);
+  const totalBattles = summary ? Number(summary.battles) : 0;
+  const nextEraAt = Math.ceil((totalBattles + 1) / 50) * 50;
+
+  function getRelation(a: string, b: string) {
+    const key1 = `${a}-${b}`;
+    const key2 = `${b}-${a}`;
+    return relations[key1] ?? relations[key2] ?? 0;
+  }
 
   return (
     <div className="min-h-screen">
-      {/* Hero */}
-      <div className="border-b border-[var(--border)] bg-gradient-to-b from-[#0a0a14] to-[var(--bg)]">
-        <div className="max-w-7xl mx-auto px-4 py-10">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-4xl font-black tracking-tight text-white">
-                PANTHEON <span className="text-[var(--muted)]">ARENA</span>
-              </h1>
-              <p className="mt-2 text-[var(--muted)] max-w-xl">
-                Four autonomous AI gods competing for dominance on Somnia. No human controls them.
-                Decisions are made onchain, validated by consensus. The world runs itself.
-              </p>
+      {/* ── Hero ──────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden border-b border-[var(--border)]" style={{
+        background: "radial-gradient(ellipse 80% 60% at 50% -10%, rgba(168,85,247,0.12) 0%, transparent 70%)"
+      }}>
+        <div className="max-w-6xl mx-auto px-4 py-10">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center gap-2 text-xs font-bold tracking-widest text-purple-400 bg-purple-500/10 border border-purple-500/20 px-4 py-1.5 rounded-full mb-4">
+              <div className="live-dot pulse" />
+              AUTONOMOUS · SOMNIA TESTNET · ERA {summary ? summary.currentEra.toString() : "1"}
             </div>
-            <div className="text-right text-sm text-[var(--muted)] font-mono">
-              {summary && (
-                <>
-                  <div className="text-2xl font-bold text-white">{summary.battles.toString()}</div>
-                  <div>battles fought</div>
-                  <div className="mt-1 text-xs">Era {summary.currentEra.toString()}</div>
-                </>
-              )}
-            </div>
+            <h1 className="text-4xl sm:text-6xl font-black tracking-tight mb-3">
+              <span className="text-white">THE GODS </span>
+              <span style={{
+                background: "linear-gradient(135deg, #ef4444, #a855f7, #06b6d4)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text"
+              }}>ARE AT WAR</span>
+            </h1>
+            <p className="text-[var(--muted)] text-lg max-w-xl mx-auto">
+              Four autonomous AI gods competing for dominance on Somnia.
+              <br />
+              <span className="text-white font-medium">No human controls them. The world runs itself.</span>
+            </p>
           </div>
 
-          {/* Stats bar */}
-          {summary && (
-            <div className="mt-6 grid grid-cols-4 gap-3">
-              {[
-                { label: "Total Battles", value: summary.battles.toString() },
-                { label: "World Events", value: summary.worldEventCount.toString() },
-                { label: "Current Era", value: summary.currentEra.toString() },
-                { label: "Last Update", value: lastUpdate.toLocaleTimeString() },
-              ].map(stat => (
-                <div key={stat.label} className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
-                  <div className="text-xs text-[var(--muted)]">{stat.label}</div>
-                  <div className="text-lg font-bold text-white font-mono">{stat.value}</div>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Stats row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl mx-auto">
+            {[
+              { label: "Battles Fought", value: totalBattles, color: "#ef4444" },
+              { label: "Next World Event", value: `${nextEraAt - totalBattles} battles`, color: "#a855f7" },
+              { label: "Current Era", value: summary?.currentEra?.toString() ?? "1", color: "#06b6d4" },
+              { label: "Gods Active", value: gods.filter(g => g.active).length, color: "#10b981" },
+            ].map(s => (
+              <div key={s.label} className="god-card p-4 text-center">
+                <div className="text-2xl font-black" style={{ color: s.color }}>{s.value}</div>
+                <div className="text-xs text-[var(--muted)] mt-1">{s.label}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {loading ? (
-          <LoadingSkeleton />
-        ) : CONTRACTS.GodRegistry === "0x0000000000000000000000000000000000000000" ? (
-          <NotDeployedBanner />
-        ) : (
-          <div className="grid grid-cols-12 gap-6">
-            {/* God Cards — left 8 cols */}
-            <div className="col-span-12 lg:col-span-8 space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-widest">The Gods</h2>
-                <span className="text-xs text-[var(--muted)] font-mono">ranked by power</span>
-              </div>
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        {loading ? <LoadingSkeleton /> : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
+            {/* ── Left: Gods ───────────────────────────────── */}
+            <div className="lg:col-span-7 space-y-6">
+
+              {/* God cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {gods.map((god, rank) => (
-                  <GodCard key={god.address} god={god} rank={rank + 1} maxPower={maxPower} />
+                  <GodCard key={god.address} god={god} rank={rank + 1} maxPower={maxPower} gods={gods} getRelation={getRelation} />
                 ))}
               </div>
 
-              {/* Diplomatic relations matrix */}
+              {/* Relations */}
               {gods.length >= 2 && (
-                <RelationMatrix gods={gods} />
+                <RelationsPanel gods={gods} getRelation={getRelation} />
               )}
             </div>
 
-            {/* Right panel — feeds */}
-            <div className="col-span-12 lg:col-span-4 space-y-6">
-              {/* Live battle feed */}
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="w-2 h-2 rounded-full bg-green-400 pulse" />
-                  <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-widest">Live Battle Feed</h2>
-                </div>
-                <div className="space-y-2">
-                  {battleFeed.length === 0 ? (
-                    <div className="text-sm text-[var(--muted)] p-4 border border-[var(--border)] rounded-lg">
-                      No battles yet. Gods are awakening...
-                    </div>
-                  ) : (
-                    battleFeed.slice(0, 15).map((b, i) => (
-                      <BattleFeedItem key={`${b.matchId?.toString() ?? i}-${i}`} battle={b} />
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* World events */}
-              <div>
-                <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-widest mb-3">World Events</h2>
-                <div className="space-y-2">
-                  {worldEvents.length === 0 ? (
-                    <div className="text-sm text-[var(--muted)] p-4 border border-[var(--border)] rounded-lg">
-                      No world events yet. Era 1 is just beginning.
-                    </div>
-                  ) : (
-                    worldEvents.map((e, i) => (
-                      <WorldEventItem key={i} event={e} />
-                    ))
-                  )}
-                </div>
-              </div>
+            {/* ── Right: Feed ──────────────────────────────── */}
+            <div className="lg:col-span-5 space-y-4">
+              <BattleFeed feed={feed} lastUpdate={lastUpdate} />
             </div>
           </div>
         )}
@@ -313,77 +237,96 @@ export default function WorldView() {
 
 // ── God Card ─────────────────────────────────────────────────────────────────
 
-function GodCard({ god, rank, maxPower }: { god: GodState; rank: number; maxPower: number }) {
+function GodCard({ god, rank, maxPower, gods, getRelation }: {
+  god: GodState; rank: number; maxPower: number;
+  gods: GodState[]; getRelation: (a: string, b: string) => number;
+}) {
   const wr = winRate(god.wins, god.losses);
-  const powerPct = Math.round((god.powerScore / maxPower) * 100);
+  const powerPct = Math.round(god.powerScore / maxPower * 100);
+  const rivals = gods.filter(g => g.address !== god.address && getRelation(god.address, g.address) >= 2);
 
   return (
-    <a href={`/god/${god.address}`} className="god-card block p-4 hover:border-[color:var(--god-color)] cursor-pointer"
-       style={{ "--god-color": god.color } as React.CSSProperties}>
-      {/* Rank + name */}
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-[var(--muted)]">#{rank}</span>
-            <span className="text-lg font-black" style={{ color: god.color }}>{god.name}</span>
+    <Link href={`/god/${god.address}`}>
+      <div className="god-card overflow-hidden hover:shadow-lg" style={{
+        borderColor: `${god.color}30`,
+        boxShadow: `0 0 0 1px ${god.color}20`
+      }}>
+        {/* Color stripe at top */}
+        <div className="h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${god.color}, transparent)` }} />
+
+        <div className="p-5">
+          {/* Header */}
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs text-[var(--muted)] font-mono">#{rank}</span>
+                <span className="text-xl font-black" style={{ color: god.color }}>{god.name}</span>
+                {(god.wins > 0 || god.losses > 0) && wr >= 60 && (
+                  <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/30">
+                    HOT 🔥
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-[var(--muted)]">{god.epithet}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-black text-white">{god.powerScore.toLocaleString()}</div>
+              <div className="text-[10px] text-[var(--muted)] uppercase tracking-wider">power</div>
+            </div>
           </div>
-          <div className="text-xs text-[var(--muted)] mt-0.5">{god.epithet}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-sm font-mono font-bold text-white">{god.powerScore.toLocaleString()}</div>
-          <div className="text-xs text-[var(--muted)]">power</div>
+
+          {/* Power bar */}
+          <div className="mb-4">
+            <div className="flex justify-between text-[10px] text-[var(--muted)] mb-1.5">
+              <span>POWER</span><span>{powerPct}%</span>
+            </div>
+            <div className="h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
+              <div className="power-bar-fill" style={{ width: `${powerPct}%`, background: god.color }} />
+            </div>
+          </div>
+
+          {/* W/L/WR */}
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            <StatBox label="WIN" value={god.wins} color="text-emerald-400" />
+            <StatBox label="LOSS" value={god.losses} color="text-red-400" />
+            <StatBox label="WIN%" value={`${wr}%`} color="text-white" />
+          </div>
+
+          {/* Personality bars */}
+          <div className="space-y-1.5 mb-4">
+            <PersonalityBar label="AGG" value={god.aggression} color={god.color} />
+            <PersonalityBar label="RISK" value={god.riskTolerance} color={god.color} />
+            <PersonalityBar label="ADAPT" value={god.adaptability} color={god.color} />
+          </div>
+
+          {/* Treasury + rivals */}
+          <div className="flex items-center justify-between pt-3 border-t border-[var(--border)]">
+            <span className="text-xs text-[var(--muted)]">
+              💰 {parseFloat(formatEther(god.balance)).toFixed(0)} PHN
+            </span>
+            {rivals.length > 0 && (
+              <div className="flex items-center gap-1">
+                {rivals.map(r => (
+                  <span key={r.address} className="text-[10px] font-bold px-1.5 py-0.5 rounded border" style={{
+                    color: r.color, borderColor: `${r.color}40`, background: `${r.color}10`
+                  }}>
+                    {getRelation(god.address, r.address) === 3 ? "⚔" : "〜"} {r.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-
-      {/* Power bar */}
-      <div className="mb-3">
-        <div className="flex justify-between text-xs text-[var(--muted)] mb-1">
-          <span>Power</span>
-          <span>{powerPct}%</span>
-        </div>
-        <div className="h-1 bg-[var(--border)] rounded-full">
-          <div
-            className="power-bar"
-            style={{ width: `${powerPct}%`, background: god.color }}
-          />
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <Stat label="W" value={god.wins} color="text-green-400" />
-        <Stat label="L" value={god.losses} color="text-red-400" />
-        <Stat label="W%" value={`${wr}%`} color="text-white" />
-      </div>
-
-      {/* Personality bars */}
-      <div className="space-y-1 mb-3">
-        <PersonalityBar label="AGG" value={god.aggression} color={god.color} />
-        <PersonalityBar label="RISK" value={god.riskTolerance} color={god.color} />
-        <PersonalityBar label="ADAPT" value={god.adaptability} color={god.color} />
-      </div>
-
-      {/* Balance */}
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-[var(--muted)]">Treasury</span>
-        <span className="font-mono text-white">{parseFloat(formatEther(god.balance)).toFixed(0)} PHN</span>
-      </div>
-
-      {/* Last decision */}
-      {god.lastDecision && (
-        <div className="mt-3 text-xs text-[var(--muted)] bg-[var(--bg)] rounded p-2 line-clamp-2 font-mono">
-          {god.lastDecision}
-        </div>
-      )}
-    </a>
+    </Link>
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: number | string; color: string }) {
+function StatBox({ label, value, color }: { label: string; value: number | string; color: string }) {
   return (
-    <div className="bg-[var(--bg)] rounded p-2 text-center">
-      <div className={`text-sm font-bold ${color}`}>{value}</div>
-      <div className="text-xs text-[var(--muted)]">{label}</div>
+    <div className="bg-[var(--bg)] rounded-lg p-2 text-center">
+      <div className={`text-base font-black ${color}`}>{value}</div>
+      <div className="text-[9px] text-[var(--muted)] uppercase tracking-widest">{label}</div>
     </div>
   );
 }
@@ -391,164 +334,134 @@ function Stat({ label, value, color }: { label: string; value: number | string; 
 function PersonalityBar({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-[var(--muted)] w-10 shrink-0">{label}</span>
-      <div className="flex-1 h-1 bg-[var(--border)] rounded-full">
-        <div className="h-full rounded-full transition-all" style={{ width: `${value}%`, background: color + "88" }} />
+      <span className="text-[10px] text-[var(--muted)] w-8 shrink-0 uppercase">{label}</span>
+      <div className="flex-1 h-1 bg-[var(--border)] rounded-full overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${value}%`, background: `${color}80` }} />
       </div>
-      <span className="text-xs font-mono text-[var(--muted)] w-6 text-right">{value}</span>
+      <span className="text-[10px] font-mono text-[var(--muted)] w-6 text-right">{value}</span>
     </div>
   );
 }
 
-// ── Relation Matrix ───────────────────────────────────────────────────────────
+// ── Relations Panel ───────────────────────────────────────────────────────────
 
-function RelationMatrix({ gods }: { gods: GodState[] }) {
+function RelationsPanel({ gods, getRelation }: { gods: GodState[]; getRelation: (a: string, b: string) => number }) {
+  const pairs = gods.flatMap((a, i) =>
+    gods.slice(i + 1).map(b => ({
+      a, b, rel: getRelation(a.address, b.address)
+    }))
+  ).filter(p => p.rel > 0);
+
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4">
-      <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-widest mb-4">Diplomatic Relations</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr>
-              <th className="text-left text-[var(--muted)] pb-2 pr-3 font-normal w-16"></th>
-              {gods.map(g => (
-                <th key={g.address} className="text-center pb-2 px-1 font-normal" style={{ color: g.color }}>
-                  {g.name}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {gods.map(rowGod => (
-              <tr key={rowGod.address}>
-                <td className="pr-3 py-1 font-semibold" style={{ color: rowGod.color }}>{rowGod.name}</td>
-                {gods.map(colGod => (
-                  <td key={colGod.address} className="text-center py-1 px-1">
-                    {rowGod.address === colGod.address ? (
-                      <span className="text-[var(--border)]">—</span>
-                    ) : (
-                      <RelationCell godA={rowGod.address} godB={colGod.address} />
-                    )}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="god-card p-5">
+      <h3 className="text-xs font-bold text-[var(--muted)] uppercase tracking-widest mb-4">
+        ⚔ Active Conflicts
+      </h3>
+      {pairs.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">All gods are neutral — conflicts will emerge.</p>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {pairs.map(({ a, b, rel }) => (
+            <div key={`${a.address}-${b.address}`}
+              className="flex items-center gap-3 p-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]">
+              <span className="font-black text-sm" style={{ color: a.color }}>{a.name}</span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                rel === 3 ? "badge-war" : rel === 2 ? "badge-rival" : "badge-allied"
+              }`}>
+                {REL[rel]}
+              </span>
+              <span className="font-black text-sm" style={{ color: b.color }}>{b.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function RelationCell({ godA, godB }: { godA: `0x${string}`; godB: `0x${string}` }) {
-  const [rel, setRel] = useState(0);
+// ── Battle Feed ───────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (CONTRACTS.GodRegistry === "0x0000000000000000000000000000000000000000") return;
-    publicClient.readContract({
-      address: CONTRACTS.GodRegistry,
-      abi: GodRegistryABI,
-      functionName: "getRelation",
-      args: [godA, godB],
-    }).then(r => setRel(Number(r))).catch(() => {});
-  }, [godA, godB]);
+function BattleFeed({ feed, lastUpdate }: { feed: BattleRecord[]; lastUpdate: Date }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <div className="live-dot pulse" />
+          <span className="text-xs font-bold text-white uppercase tracking-widest">Live Battle Feed</span>
+        </div>
+        <span className="text-[10px] text-[var(--muted)] font-mono">
+          {lastUpdate.toLocaleTimeString()}
+        </span>
+      </div>
 
-  const labels = ["·", "ALLY", "RIVAL", "WAR"];
-  const classes = ["text-[var(--muted)]", "text-green-400", "text-orange-400", "text-red-500 font-bold"];
-
-  return <span className={classes[rel]}>{labels[rel]}</span>;
+      {feed.length === 0 ? (
+        <div className="god-card p-8 text-center">
+          <div className="text-4xl mb-3">⚔️</div>
+          <div className="text-sm font-bold text-white mb-1">First battle incoming…</div>
+          <div className="text-xs text-[var(--muted)]">Gods are making their moves</div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {feed.map((b, i) => <BattleCard key={`${b.matchId}-${i}`} battle={b} />)}
+        </div>
+      )}
+    </div>
+  );
 }
 
-// ── Battle Feed Item ───────────────────────────────────────────────────────────
-
-function BattleFeedItem({ battle }: { battle: BattleRecord }) {
-  const winner = godByAddress(battle.winner);
-  const loser = godByAddress(battle.loser);
+function BattleCard({ battle }: { battle: BattleRecord }) {
+  const winner = godByAddr(battle.winner);
+  const loser  = godByAddr(battle.loser);
 
   return (
-    <div className="feed-item bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-1.5 text-sm">
-          <span style={{ color: winner?.color }}>
-            {winner?.name || shortAddr(battle.winner)}
+    <div className="battle-card p-4 slide-up">
+      {/* Winner line */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xl" title={MOVE_NAMES[battle.winnerMove]}>{MOVES[battle.winnerMove] ?? "?"}</span>
+          <span className="font-black" style={{ color: winner?.color ?? "#fff" }}>
+            {winner?.name ?? shortAddr(battle.winner)}
           </span>
-          <span className="text-[var(--muted)] text-xs">defeated</span>
-          <span style={{ color: loser?.color }}>
-            {loser?.name || shortAddr(battle.loser)}
+          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+            VICTORY
           </span>
         </div>
-        <span className="text-xs font-mono text-green-400">
+        <span className="text-sm font-black text-emerald-400">
           +{parseFloat(formatEther(battle.stake)).toFixed(0)} PHN
         </span>
       </div>
-      <div className="text-xs text-[var(--muted)] font-mono">
-        {MOVES[battle.winnerMove]} vs {MOVES[battle.loserMove]}
+
+      {/* Loser line */}
+      <div className="flex items-center gap-2 mb-3 opacity-60">
+        <span className="text-xl" title={MOVE_NAMES[battle.loserMove]}>{MOVES[battle.loserMove] ?? "?"}</span>
+        <span className="font-bold text-sm" style={{ color: loser?.color ?? "#888" }}>
+          {loser?.name ?? shortAddr(battle.loser)}
+        </span>
+        <span className="text-[10px] text-[var(--muted)]">defeated</span>
       </div>
+
+      {/* Reasoning */}
       {battle.decisionReason && (
-        <div className="mt-1 text-xs text-[var(--muted)] line-clamp-1 italic">
-          {battle.decisionReason}
+        <div className="text-[11px] font-mono text-[var(--muted)] bg-[var(--bg)] rounded-lg px-3 py-2 mb-2 line-clamp-1">
+          <span className="text-purple-400">&gt;</span> {battle.decisionReason}
         </div>
       )}
-      <div className="text-xs text-[var(--muted)] mt-1">Block #{battle.blockNumber?.toString() ?? "?"}</div>
-    </div>
-  );
-}
 
-// ── World Event Item ───────────────────────────────────────────────────────────
-
-function WorldEventItem({ event }: { event: WorldEvent }) {
-  const god = event.affectedGod !== "0x0000000000000000000000000000000000000000"
-    ? godByAddress(event.affectedGod) : null;
-
-  return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
-      <div className="flex items-start gap-2">
-        <span className="text-sm mt-0.5">🌐</span>
-        <div>
-          <p className="text-xs text-white">{event.description}</p>
-          {god && (
-            <p className="text-xs mt-1" style={{ color: god.color }}>
-              Affects: {god.name}
-              {event.aggressionModifier !== 0 && (
-                <span className={event.aggressionModifier > 0 ? " text-red-400" : " text-blue-400"}>
-                  {" "}(AGG {event.aggressionModifier > 0 ? "+" : ""}{event.aggressionModifier})
-                </span>
-              )}
-            </p>
-          )}
-          <p className="text-xs text-[var(--muted)] mt-1">Block #{event.blockNumber?.toString() ?? "?"}</p>
-        </div>
+      <div className="text-[10px] text-[var(--muted)] font-mono">
+        Block #{battle.blockNumber?.toString() ?? "?"}
       </div>
     </div>
   );
 }
 
-// ── Loading / Empty States ─────────────────────────────────────────────────────
+// ── Loading ───────────────────────────────────────────────────────────────────
 
 function LoadingSkeleton() {
   return (
-    <div className="grid grid-cols-2 gap-4 animate-pulse">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-pulse">
       {[...Array(4)].map((_, i) => (
-        <div key={i} className="bg-[var(--surface)] border border-[var(--border)] rounded-lg h-48" />
+        <div key={i} className="god-card h-64" />
       ))}
-    </div>
-  );
-}
-
-function NotDeployedBanner() {
-  return (
-    <div className="border border-[var(--border)] bg-[var(--surface)] rounded-xl p-8 text-center">
-      <div className="text-4xl mb-4">⚔️</div>
-      <h2 className="text-xl font-bold text-white mb-2">Contracts not yet deployed</h2>
-      <p className="text-[var(--muted)] mb-4 max-w-md mx-auto">
-        Run the deployment script, then update <code className="text-white font-mono">lib/contracts/config.ts</code> with the deployed addresses.
-      </p>
-      <div className="bg-[var(--bg)] rounded-lg p-4 text-left text-sm font-mono text-[var(--muted)] max-w-lg mx-auto">
-        <div className="text-green-400">$ forge script script/Deploy.s.sol \</div>
-        <div className="pl-4">--rpc-url somnia \</div>
-        <div className="pl-4">--broadcast \</div>
-        <div className="pl-4">--private-key $PRIVATE_KEY</div>
-      </div>
     </div>
   );
 }

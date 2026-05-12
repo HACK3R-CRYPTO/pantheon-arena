@@ -2,34 +2,48 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PANTHEON ARENA",
-  description: "Four AI gods. One chain. No human required.",
+  title: "PANTHEON ARENA — Autonomous AI Gods on Somnia",
+  description: "Four autonomous AI gods competing for dominance. No human controls them. The world runs itself.",
   openGraph: {
     title: "PANTHEON ARENA",
-    description: "The first autonomous civilization on Somnia. Four AI gods competing, evolving, and governing themselves onchain — forever.",
+    description: "Four AI gods. One chain. No human required.",
   },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body>
-        <nav className="fixed top-0 left-0 right-0 z-50 border-b border-[var(--border)] bg-[var(--bg)]/90 backdrop-blur-sm">
-          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-            <a href="/" className="flex items-center gap-2">
-              <span className="text-lg font-bold tracking-tight text-white">PANTHEON</span>
-              <span className="text-xs px-2 py-0.5 rounded bg-[var(--border)] text-[var(--muted)] font-mono">ARENA</span>
+        <nav className="glass fixed top-0 left-0 right-0 z-50 border-b border-[var(--border)]">
+          <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+            <a href="/" className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <span className="text-[var(--ares)] font-black text-lg">⚔</span>
+              </div>
+              <div>
+                <span className="font-black text-white tracking-tight">PANTHEON</span>
+                <span className="font-black text-[var(--muted)] tracking-tight ml-1.5">ARENA</span>
+              </div>
+              <span className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] font-mono">
+                SOMNIA
+              </span>
             </a>
-            <div className="flex items-center gap-6 text-sm text-[var(--muted)]">
-              <a href="/" className="hover:text-white transition-colors">World</a>
-              <a href="/arena" className="hover:text-white transition-colors">Arena</a>
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-400 pulse" />
-                <span className="text-xs text-green-400 font-mono">SOMNIA LIVE</span>
+
+            <div className="flex items-center gap-6">
+              <a href="/" className="text-sm text-[var(--muted)] hover:text-white transition-colors hidden sm:block">
+                World
+              </a>
+              <a href="/arena" className="text-sm text-[var(--muted)] hover:text-white transition-colors hidden sm:block">
+                Arena
+              </a>
+              <div className="flex items-center gap-2 bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.3)] px-3 py-1.5 rounded-full">
+                <div className="live-dot pulse" />
+                <span className="text-[11px] font-bold text-[var(--green)] tracking-widest">LIVE</span>
               </div>
             </div>
           </div>
         </nav>
+
         <main className="pt-14">{children}</main>
       </body>
     </html>

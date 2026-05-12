@@ -1,81 +1,113 @@
 @import "tailwindcss";
 
 :root {
-  --ares: #EF4444;
-  --athena: #EAB308;
-  --hermes: #06B6D4;
-  --chaos: #A855F7;
-  --bg: #050508;
-  --surface: #0d0d14;
-  --border: #1a1a2e;
-  --text: #e2e8f0;
-  --muted: #64748b;
+  --ares:    #EF4444;
+  --athena:  #EAB308;
+  --hermes:  #06B6D4;
+  --chaos:   #A855F7;
+  --bg:      #08080f;
+  --card:    #0e0e1a;
+  --border:  #1e1e35;
+  --text:    #f0f0ff;
+  --muted:   #6b7280;
+  --green:   #10b981;
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-body {
+html, body {
   background: var(--bg);
   color: var(--text);
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: system-ui, -apple-system, sans-serif;
   min-height: 100vh;
+  overscroll-behavior: none;
 }
 
-/* Glowing border effect for god cards */
+/* ── Animations ──────────────────────────────────────────────── */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes battle-flash {
+  0%   { background: rgba(239,68,68,0.15); }
+  100% { background: transparent; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position: 200% 0; }
+}
+
+.pulse        { animation: pulse-glow 1.8s ease-in-out infinite; }
+.slide-up     { animation: slide-up 0.3s ease-out forwards; }
+.float-anim   { animation: float 4s ease-in-out infinite; }
+.battle-flash { animation: battle-flash 0.6s ease-out; }
+
+/* ── Cards ───────────────────────────────────────────────────── */
 .god-card {
-  position: relative;
-  background: var(--surface);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+.god-card:hover {
+  transform: translateY(-2px);
+}
+
+/* ── Battle card ─────────────────────────────────────────────── */
+.battle-card {
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: hidden;
-  transition: all 0.2s;
+  transition: border-color 0.2s;
+}
+.battle-card:hover { border-color: #2e2e50; }
+
+/* ── Relation badges ─────────────────────────────────────────── */
+.badge-war     { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+.badge-rival   { background: rgba(251,146,60,0.15); color: #fb923c; border: 1px solid rgba(251,146,60,0.3); }
+.badge-allied  { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+.badge-neutral { background: rgba(107,114,128,0.15); color: #6b7280; border: 1px solid rgba(107,114,128,0.3); }
+
+/* ── Power bar ───────────────────────────────────────────────── */
+.power-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
 }
 
-.god-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  opacity: 0;
-  transition: opacity 0.3s;
-  pointer-events: none;
-}
-
-.god-card:hover::before { opacity: 1; }
-
-/* Live pulse indicator */
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.4); }
-}
-.pulse { animation: pulse-dot 1.5s ease-in-out infinite; }
-
-/* Feed item slide in */
-@keyframes slide-in {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.feed-item { animation: slide-in 0.25s ease-out; }
-
-/* Power bar */
-.power-bar {
-  height: 4px;
-  border-radius: 2px;
-  transition: width 0.6s ease;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: var(--surface); }
+/* ── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* Move icons */
-.move-rock     { color: #94a3b8; }
-.move-paper    { color: #60a5fa; }
-.move-scissors { color: #f87171; }
+/* ── Glass effect ────────────────────────────────────────────── */
+.glass {
+  background: rgba(14,14,26,0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
 
-/* Relation badges */
-.rel-neutral { background: #1e293b; color: #94a3b8; }
-.rel-allied  { background: #14532d; color: #4ade80; }
-.rel-rival   { background: #451a03; color: #fb923c; }
-.rel-war     { background: #450a0a; color: #f87171; }
+/* ── Gradient text ───────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #fff 0%, #a78bfa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Live dot ────────────────────────────────────────────────── */
+.live-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
