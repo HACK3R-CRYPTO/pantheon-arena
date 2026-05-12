@@ -72,8 +72,12 @@ contract Arena {
     error DeadlineExpired();
     error InsufficientBalance();
 
+    /// @notice GodMind contract — authorized to call Arena on behalf of any god.
+    ///         This means only the deployer wallet needs STT. God addresses are identities.
+    address public godMind;
+
     modifier onlyGod(address god) {
-        if (msg.sender != god) revert Unauthorized();
+        if (msg.sender != god && msg.sender != godMind && msg.sender != owner) revert Unauthorized();
         _;
     }
 
@@ -86,6 +90,10 @@ contract Arena {
         registry = GodRegistry(_registry);
         token = PantheonToken(_token);
         owner = msg.sender;
+    }
+
+    function setGodMind(address _godMind) external onlyOwner {
+        godMind = _godMind;
     }
 
     function setWorldState(address _worldState) external onlyOwner {

@@ -80,6 +80,7 @@ contract Deploy is Script {
         token.setArena(address(arena));
         registry.setArena(address(arena));
         arena.setWorldState(address(worldState));
+        arena.setGodMind(address(godMind)); // GodMind can act on behalf of all gods
 
         // ── 7. Register the four gods ──────────────────────────────────────────
         registry.registerGod(ARES_ADDR, GodRegistry.GodPersonality({
