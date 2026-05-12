@@ -4,15 +4,28 @@ pragma solidity 0.8.30;
 import {GodRegistry} from "./GodRegistry.sol";
 import {Arena} from "./Arena.sol";
 import {WorldState} from "./WorldState.sol";
-import {IAgentRequester, IAgentRequesterHandler, ILLMAgent} from "./interfaces/ISomniaAgents.sol";
+import {IAgentRequester, IAgentRequesterHandler, ILLMAgent, IJsonApiAgent} from "./interfaces/ISomniaAgents.sol";
 
-/// @notice God decision engine. Calls Somnia LLM Inference for moves; falls back to Markov.
-///         Every decision is permanently logged onchain — the AI reasoning is public record.
+/// @notice God decision engine.
+///
+///         HYBRID AI ARCHITECTURE:
+///         Uses Somnia's JSON API agent (consensus-validated, works on testnet) to call
+///         an external LLM API endpoint. Multiple Somnia validators independently fetch
+///         the same URL and reach consensus on the AI response before it enters the chain.
+///
+///         This means: real AI reasoning + Somnia consensus validation.
+///         Switch to native LLM Inference when Somnia validators are fully online.
+///
+///         Decision history is permanently logged onchain — every AI choice is auditable.
 contract GodMind is IAgentRequesterHandler {
 
     IAgentRequester public agentPlatform;
-    uint256 public llmAgentId;
-    uint256 public constant LLM_TOTAL_COST = 0.03 ether; // platform getRequestDeposit() on Somnia testnet
+    uint256 public llmAgentId;  // 0 = disabled (pure Markov); 13174292974160097713 = JSON API agent
+    uint256 public constant LLM_TOTAL_COST = 0.03 ether;
+
+    // LLM proxy URL — deployed serverless function that calls Groq/OpenAI
+    // Somnia JSON API validators call this URL and reach consensus on the response
+    string public llmProxyUrl;
 
     GodRegistry public registry;
     Arena public arena;
@@ -65,19 +78,22 @@ contract GodMind is IAgentRequesterHandler {
         address _arena,
         address _worldState,
         address _agentPlatform,
-        uint256 _llmAgentId
+        uint256 _llmAgentId,
+        string memory _llmProxyUrl
     ) {
         registry = GodRegistry(_registry);
         arena = Arena(_arena);
         worldState = WorldState(payable(_worldState));
         agentPlatform = IAgentRequester(_agentPlatform);
         llmAgentId = _llmAgentId;
+        llmProxyUrl = _llmProxyUrl;
         owner = msg.sender;
     }
 
-    function setAgentConfig(address _platform, uint256 _agentId) external onlyOwner {
+    function setAgentConfig(address _platform, uint256 _agentId, string calldata _proxyUrl) external onlyOwner {
         agentPlatform = IAgentRequester(_platform);
         llmAgentId = _agentId;
+        llmProxyUrl = _proxyUrl;
     }
 
     // ─── Entry Point ────────────────────────────────────────────────────────────
@@ -117,19 +133,27 @@ contract GodMind is IAgentRequesterHandler {
         }
     }
 
+    /// @notice Calls the LLM proxy via Somnia JSON API agent.
+    ///         URL: llmProxyUrl?god=<addr>&opp=<addr>&match=<id>&ow=<wins>&ol=<losses>
+    ///         Multiple Somnia validators independently fetch this URL and reach consensus.
+    ///         The proxy calls Groq/OpenAI and returns: {"move": 0|1|2}
     function _requestLLMMove(address god, address opp, uint256 matchId, uint256 stake, uint8 markovMove) internal {
-        GodRegistry.GodPersonality memory p = registry.getPersonality(god);
         GodRegistry.GodStats memory os = registry.getStats(opp);
 
-        string memory prompt = _movePrompt(p.name, registry.getPersonality(opp).name, os.wins, os.losses, matchId);
+        string memory url = string(abi.encodePacked(
+            llmProxyUrl, "?god=", _addr(god),
+            "&opp=", _addr(opp),
+            "&match=", _u(matchId),
+            "&ow=", _u(os.wins),
+            "&ol=", _u(os.losses)
+        ));
 
+        // Use JSON API agent (consensus-validated, works on testnet)
         bytes memory payload = abi.encodeWithSelector(
-            ILLMAgent.inferNumber.selector,
-            prompt,
-            p.lore,
-            int256(0),
-            int256(2),
-            false
+            IJsonApiAgent.fetchUint.selector,
+            url,
+            "move",   // JSON path: response.move
+            uint8(0)  // no decimal scaling
         );
 
         try agentPlatform.createRequest{value: LLM_TOTAL_COST}(
@@ -139,25 +163,11 @@ contract GodMind is IAgentRequesterHandler {
             payload
         ) returns (uint256 requestId) {
             pendingRequests[requestId] = PendingRequest(god, opp, stake, matchId, markovMove);
-            emit LLMDecisionRequested(god, requestId, prompt);
+            emit LLMDecisionRequested(god, requestId, url);
         } catch {
-            // LLM agent unavailable — use Markov directly
-            emit MarkovFallback(god, "LLM agent unavailable");
-            _commitMove(god, matchId, markovMove, opp, stake, "Markov (LLM unavailable)", false);
+            emit MarkovFallback(god, "JSON API agent unavailable");
+            _commitMove(god, matchId, markovMove, opp, stake, "Markov (agent unavailable)", false);
         }
-    }
-
-    function _movePrompt(
-        string memory godName,
-        string memory oppName,
-        uint256 oppWins,
-        uint256 oppLosses,
-        uint256 matchId
-    ) internal pure returns (string memory) {
-        string memory part1 = string(abi.encodePacked("You are ", godName, " in match #", _u(matchId), "."));
-        string memory part2 = string(abi.encodePacked(" vs ", oppName, " (", _u(oppWins), "W/", _u(oppLosses), "L)."));
-        string memory part3 = " Choose 0=Rock 1=Paper 2=Scissors. Return ONLY 0, 1, or 2.";
-        return string(abi.encodePacked(part1, part2, part3));
     }
 
     function _doReveal(address god, uint256 matchId) internal {
@@ -187,12 +197,15 @@ contract GodMind is IAgentRequesterHandler {
         string memory reason = "LLM failed. Markov fallback.";
 
         if (status == IAgentRequester.ResponseStatus.Success && responses.length > 0) {
-            try this.decodeInt(responses[0].result) returns (int256 v) {
-                if (v >= 0 && v <= 2) {
-                    move = uint8(uint256(v));
+            // JSON API agent returns uint256 (the move: 0, 1, or 2)
+            try this.decodeUint(responses[0].result) returns (uint256 v) {
+                if (v <= 2) {
+                    move = uint8(v);
                     usedLLM = true;
                     llmDecisions++;
-                    reason = string(abi.encodePacked("Somnia LLM. Move:", _u(move), " Req#", _u(requestId)));
+                    reason = string(abi.encodePacked(
+                        "Somnia JSON API+LLM (hybrid). Move:", _u(move), " Req#", _u(requestId)
+                    ));
                 }
             } catch {}
         }
@@ -208,6 +221,10 @@ contract GodMind is IAgentRequesterHandler {
 
     function decodeInt(bytes memory data) external pure returns (int256) {
         return abi.decode(data, (int256));
+    }
+
+    function decodeUint(bytes memory data) external pure returns (uint256) {
+        return abi.decode(data, (uint256));
     }
 
     // ─── Idle ─────────────────────────────────────────────────────────────────
@@ -239,22 +256,24 @@ contract GodMind is IAgentRequesterHandler {
         }
     }
 
+    /// @notice Challenge decision via Somnia JSON API → LLM proxy.
+    ///         Returns move choice (0/1/2) via the same proxy endpoint.
     function _requestLLMChallenge(address god, address target, uint256 stake, GodRegistry.GodPersonality memory p) internal {
         GodRegistry.GodStats memory ts = registry.getStats(target);
-        string memory tName = registry.getPersonality(target).name;
 
-        string memory prompt = string(abi.encodePacked(
-            "You are ", p.name, ". Challenge ", tName,
-            " (power:", _u(ts.powerScore), "). Stake:", _u(stake / 1e18), " PHN.",
-            " Give one sentence strategic reason. Max 80 chars."
+        string memory url = string(abi.encodePacked(
+            llmProxyUrl, "?god=", _addr(god),
+            "&opp=", _addr(target),
+            "&match=0",
+            "&ow=", _u(ts.wins),
+            "&ol=", _u(ts.losses)
         ));
 
         bytes memory payload = abi.encodeWithSelector(
-            ILLMAgent.inferString.selector,
-            prompt,
-            p.lore,
-            false,
-            new string[](0)
+            IJsonApiAgent.fetchUint.selector,
+            url,
+            "move",
+            uint8(0)
         );
 
         try agentPlatform.createRequest{value: LLM_TOTAL_COST}(
@@ -264,10 +283,9 @@ contract GodMind is IAgentRequesterHandler {
             payload
         ) returns (uint256 requestId) {
             pendingRequests[requestId] = PendingRequest(god, target, stake, 0, p.favoredMove);
-            emit LLMDecisionRequested(god, requestId, prompt);
+            emit LLMDecisionRequested(god, requestId, url);
         } catch {
-            // LLM agent unavailable — challenge anyway with Markov reasoning
-            emit MarkovFallback(god, "LLM agent unavailable");
+            emit MarkovFallback(god, "JSON API agent unavailable");
             _executeChallenge(god, target, stake, string(abi.encodePacked(p.name, " challenges via Markov.")));
         }
     }
@@ -342,6 +360,18 @@ contract GodMind is IAgentRequesterHandler {
         bytes memory b = new bytes(d);
         while (v != 0) { d--; b[d] = bytes1(uint8(48 + v % 10)); v /= 10; }
         return string(b);
+    }
+
+    /// @notice Convert address to lowercase hex string for URL encoding
+    function _addr(address a) internal pure returns (string memory) {
+        bytes memory hex_chars = "0123456789abcdef";
+        bytes memory str = new bytes(42);
+        str[0] = "0"; str[1] = "x";
+        for (uint256 i = 0; i < 20; i++) {
+            str[2 + i * 2]     = hex_chars[uint8(bytes20(a)[i]) >> 4];
+            str[3 + i * 2]     = hex_chars[uint8(bytes20(a)[i]) & 0x0f];
+        }
+        return string(str);
     }
 
     // ─── View ─────────────────────────────────────────────────────────────────
