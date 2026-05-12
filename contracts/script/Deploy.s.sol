@@ -13,16 +13,33 @@ import {GodMind} from "../src/GodMind.sol";
 /// Usage:
 ///   forge script script/Deploy.s.sol --rpc-url somnia --broadcast --private-key $PRIVATE_KEY
 ///
-/// After deployment, fund WorldState with 32+ STT, then call worldState.activate(arenaAddress)
+/// After deployment:
+///   1. Fund WorldState with 32+ STT for reactive subscription
+///   2. Fund GodMind with 5+ STT for LLM Inference calls
+///   3. Call worldState.activate(arenaAddress) to enable reactivity
+///   4. Start the scheduler: cd ../scheduler && bun run src/index.ts
 contract Deploy is Script {
-    // God wallet addresses — replace with your actual god wallets before deployment
-    // These are the addresses whose private keys the TypeScript scheduler controls
+    // ── Somnia Agent Platform ──────────────────────────────────────────────────
+    // Testnet: 0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
+    address constant SOMNIA_AGENT_PLATFORM = 0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776;
+
+    // LLM Inference agentId — confirmed on Somnia testnet
+    // Discovered by reading live event logs from the platform contract
+    uint256 constant LLM_AGENT_ID = 12847293847561029384;
+
+    // JSON API agentId — set to 0 to disable until confirmed
+    // Run: cast call $PLATFORM "createRequest(uint256,...)" with candidate IDs to find it
+    // Or check https://agents.testnet.somnia.network for the JSON API agent ID
+    uint256 constant JSON_API_AGENT_ID = 0; // TODO: update with real JSON API agent ID
+
+    // ── God wallet addresses ───────────────────────────────────────────────────
+    // Replace with your actual god wallets (generated with: cast wallet new)
     address constant ARES_ADDR    = 0x1111111111111111111111111111111111111111;
     address constant ATHENA_ADDR  = 0x2222222222222222222222222222222222222222;
     address constant HERMES_ADDR  = 0x3333333333333333333333333333333333333333;
     address constant CHAOS_ADDR   = 0x4444444444444444444444444444444444444444;
 
-    uint256 constant INITIAL_PHN = 10_000 * 1e18; // 10,000 PHN per god
+    uint256 constant INITIAL_PHN = 10_000 * 1e18;
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -42,12 +59,22 @@ contract Deploy is Script {
         Arena arena = new Arena(address(registry), address(token));
         console.log("Arena:", address(arena));
 
-        // ── 4. Deploy WorldState ───────────────────────────────────────────────
-        WorldState worldState = new WorldState(address(registry));
+        // ── 4. Deploy WorldState (with Somnia JSON API agent config) ──────────
+        WorldState worldState = new WorldState(
+            address(registry),
+            SOMNIA_AGENT_PLATFORM,
+            JSON_API_AGENT_ID
+        );
         console.log("WorldState:", address(worldState));
 
-        // ── 5. Deploy GodMind ──────────────────────────────────────────────────
-        GodMind godMind = new GodMind(address(registry), address(arena), address(worldState));
+        // ── 5. Deploy GodMind (with Somnia LLM Inference agent config) ────────
+        GodMind godMind = new GodMind(
+            address(registry),
+            address(arena),
+            address(worldState),
+            SOMNIA_AGENT_PLATFORM,
+            LLM_AGENT_ID
+        );
         console.log("GodMind:", address(godMind));
 
         // ── 6. Wire contracts together ────────────────────────────────────────
@@ -107,15 +134,20 @@ contract Deploy is Script {
         token.mintTo(CHAOS_ADDR,  INITIAL_PHN);
 
         console.log("\n=== PANTHEON ARENA DEPLOYED ===");
-        console.log("PantheonToken:", address(token));
-        console.log("GodRegistry:  ", address(registry));
-        console.log("Arena:        ", address(arena));
-        console.log("WorldState:   ", address(worldState));
-        console.log("GodMind:      ", address(godMind));
+        console.log("PantheonToken:        ", address(token));
+        console.log("GodRegistry:          ", address(registry));
+        console.log("Arena:                ", address(arena));
+        console.log("WorldState:           ", address(worldState));
+        console.log("GodMind:              ", address(godMind));
+        console.log("Somnia Agent Platform:", SOMNIA_AGENT_PLATFORM);
+        console.log("LLM Agent ID:         ", LLM_AGENT_ID);
+        console.log("JSON API Agent ID:    ", JSON_API_AGENT_ID);
         console.log("\nNEXT STEPS:");
-        console.log("1. Fund WorldState with 32+ STT for reactive subscription");
-        console.log("2. Call worldState.activate(", address(arena), ")");
-        console.log("3. Start the TypeScript scheduler: cd ../scheduler && bun run start");
+        console.log("1. Fund WorldState with 35+ STT (32 reactive min + agent costs)");
+        console.log("2. Fund GodMind with 5+ STT (LLM Inference at 0.24 STT each)");
+        console.log("3. Call worldState.activate(arenaAddress)");
+        console.log("4. Fund god wallets with 1+ STT each for gas");
+        console.log("5. Start scheduler: cd ../scheduler && bun run src/index.ts");
 
         vm.stopBroadcast();
     }

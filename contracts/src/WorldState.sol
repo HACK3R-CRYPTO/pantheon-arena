@@ -3,15 +3,23 @@ pragma solidity 0.8.30;
 
 import {SomniaEventHandler} from "@somnia-chain/reactivity-contracts/contracts/SomniaEventHandler.sol";
 import {SomniaExtensions} from "@somnia-chain/reactivity-contracts/contracts/interfaces/SomniaExtensions.sol";
-import {ISomniaReactivityPrecompile} from "@somnia-chain/reactivity-contracts/contracts/interfaces/ISomniaReactivityPrecompile.sol";
 import {GodRegistry} from "./GodRegistry.sol";
+import {IAgentRequester, IAgentRequesterHandler, IJsonApiAgent} from "./interfaces/ISomniaAgents.sol";
 
-/// @notice The living world. Subscribes to Arena's MatchResolved event via Somnia reactivity.
-///         Somnia validators call _onEvent() automatically after every match — zero human input.
-///         Also subscribes to EpochTick to apply periodic world events.
+/// @notice The living world. Two Somnia-native primitives in one contract:
 ///
-///         IMPORTANT: This contract must hold >= 32 STT to fund reactive subscriptions.
-contract WorldState is SomniaEventHandler {
+///         1. REACTIVE CONTRACTS — Subscribes to Arena's MatchResolved event.
+///            Somnia validators call _onEvent() automatically after every match.
+///            No keeper. No cron. No human. The world updates itself.
+///
+///         2. JSON API AGENT — Every 50 battles, fetches ETH price from CoinGecko
+///            via Somnia's consensus-validated JSON API agent. Multiple validators
+///            independently fetch and agree on the result before it enters the chain.
+///            This real-world signal modifies god aggression — the world reacts to reality.
+///
+///         IMPORTANT: Must hold >= 32 STT for reactive subscriptions + STT for JSON API calls.
+///         JSON API cost: 0.1 STT/agent × 3 validators = 0.3 STT + 0.03 reserve = 0.33 STT per call.
+contract WorldState is SomniaEventHandler, IAgentRequesterHandler {
     // ─── World Era & Events ────────────────────────────────────────────────────
 
     struct WorldEvent {
@@ -37,25 +45,30 @@ contract WorldState is SomniaEventHandler {
     address public arena;
     address public owner;
 
-    uint256 public era;                     // Epoch counter, increments every ~100 blocks
-    uint256 public totalBattles;
-    uint256 public subscriptionId;          // Somnia reactive subscription ID
+    // ── Somnia JSON API Agent ──────────────────────────────────────────────────
+    IAgentRequester public agentPlatform;
+    uint256 public jsonApiAgentId;
+    uint256 public constant JSON_API_COST = 0.33 ether; // 3 validators × 0.1 STT + 0.03 reserve
+    uint256 public pendingPriceRequestId;   // Track the live JSON API request
+    uint256 public lastFetchedEthPrice;     // Last ETH price from Somnia JSON API (8 decimals)
+    uint256 public lastPriceFetchBattle;    // Battle number when we last fetched
 
-    // Live world feed — last 100 battles
+    uint256 public era;
+    uint256 public totalBattles;
+    uint256 public subscriptionId;
+
     BattleRecord[] public battleFeed;
     uint256 public constant MAX_FEED_SIZE = 100;
-
-    // World events log
     WorldEvent[] public worldEvents;
-
-    // Per-god aggression modifiers (from world events)
     mapping(address => int8) public aggressionModifier;
 
-    // ─── Events emitted by WorldState ─────────────────────────────────────────
+    // ─── Events ───────────────────────────────────────────────────────────────
     event WorldUpdated(uint256 indexed era, address indexed winner, address indexed loser, uint256 matchId);
     event EraAdvanced(uint256 indexed newEra, uint256 blockNumber);
     event WorldEventApplied(uint256 indexed era, string description);
     event SubscriptionCreated(uint256 subscriptionId);
+    event ETHPriceFetched(uint256 requestId, uint256 price, string worldImpact);
+    event JSONAPIRequested(uint256 requestId, string url);
 
     error Unauthorized();
     error ArenaNotSet();
@@ -65,14 +78,21 @@ contract WorldState is SomniaEventHandler {
         _;
     }
 
-    constructor(address _registry) {
+    constructor(address _registry, address _agentPlatform, uint256 _jsonApiAgentId) {
         registry = GodRegistry(_registry);
+        agentPlatform = IAgentRequester(_agentPlatform);
+        jsonApiAgentId = _jsonApiAgentId;
         owner = msg.sender;
         era = 1;
     }
 
+    function setAgentConfig(address _platform, uint256 _agentId) external onlyOwner {
+        agentPlatform = IAgentRequester(_platform);
+        jsonApiAgentId = _agentId;
+    }
+
     /// @notice Set Arena and activate the reactive subscription.
-    ///         Call after deploying Arena. Contract must hold 32 STT before this call.
+    ///         Contract must hold >= 32 STT before this call.
     function activate(address _arena) external onlyOwner {
         arena = _arena;
 
@@ -174,6 +194,98 @@ contract WorldState is SomniaEventHandler {
             }
             _logWorldEvent("A rare peace descends upon the pantheon. Gods rest and recover.", address(0), 0, 0);
         }
+
+        // Every era: fetch real-world ETH price via Somnia JSON API agent
+        // Consensus-validated: multiple validators independently fetch and agree before it enters the chain
+        _requestETHPrice();
+    }
+
+    // ─── Somnia JSON API Agent ────────────────────────────────────────────────
+
+    /// @notice Fetch ETH price from CoinGecko via Somnia's consensus-validated JSON API agent.
+    ///         Called automatically every 50 battles (each era advance).
+    ///         The result modifies god aggression — the world reacts to reality.
+    function _requestETHPrice() internal {
+        if (address(agentPlatform) == address(0)) return;
+        if (jsonApiAgentId == 0) return;
+        if (address(this).balance < JSON_API_COST) return;
+        if (pendingPriceRequestId != 0) return; // Already a pending request
+
+        bytes memory payload = abi.encodeWithSelector(
+            IJsonApiAgent.fetchUint.selector,
+            "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+            "ethereum.usd",
+            uint8(2) // 2 decimals: $2000.50 → 200050
+        );
+
+        uint256 requestId = agentPlatform.createRequest{value: JSON_API_COST}(
+            jsonApiAgentId,
+            address(this),
+            this.handleResponse.selector,
+            payload
+        );
+
+        pendingPriceRequestId = requestId;
+        lastPriceFetchBattle = totalBattles;
+
+        emit JSONAPIRequested(requestId, "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd");
+    }
+
+    /// @notice Somnia validators call this after consensus on the ETH price.
+    ///         NOT called by any human. The price is consensus-validated across multiple validators.
+    function handleResponse(
+        uint256 requestId,
+        IAgentRequester.Response[] memory responses,
+        IAgentRequester.ResponseStatus status,
+        IAgentRequester.Request memory /* details */
+    ) external override {
+        require(msg.sender == address(agentPlatform), "Only Somnia platform");
+
+        if (requestId != pendingPriceRequestId) return;
+        pendingPriceRequestId = 0;
+
+        if (status != IAgentRequester.ResponseStatus.Success || responses.length == 0) return;
+
+        uint256 price = abi.decode(responses[0].result, (uint256));
+        uint256 previousPrice = lastFetchedEthPrice;
+        lastFetchedEthPrice = price;
+
+        string memory impact;
+        address[] memory gods = _getAllGods();
+
+        if (previousPrice > 0) {
+            if (price < previousPrice) {
+                // Price dropped — market fear → ARES gets aggressive, others defensive
+                uint256 dropPct = ((previousPrice - price) * 100) / previousPrice;
+                if (dropPct >= 3) {
+                    for (uint256 i = 0; i < gods.length; i++) {
+                        GodRegistry.GodPersonality memory p = registry.getPersonality(gods[i]);
+                        // ARES (aggression > 80) gets more aggressive on market fear
+                        aggressionModifier[gods[i]] = p.aggression > 80 ? int8(25) : int8(-10);
+                    }
+                    impact = "ETH price dropped. Market fear activates ARES. Others grow cautious.";
+                    _logWorldEvent(impact, address(0), 25, 0);
+                }
+            } else if (price > previousPrice) {
+                // Price rose — prosperity → HERMES (trade god) gets economic advantage
+                uint256 risePct = ((price - previousPrice) * 100) / previousPrice;
+                if (risePct >= 3) {
+                    for (uint256 i = 0; i < gods.length; i++) {
+                        GodRegistry.GodPersonality memory p = registry.getPersonality(gods[i]);
+                        // HERMES (adaptability > 70) benefits from market prosperity
+                        aggressionModifier[gods[i]] = p.adaptability > 70 ? int8(20) : int8(5);
+                    }
+                    impact = "ETH price surged. Market prosperity empowers HERMES and the adaptable.";
+                    _logWorldEvent(impact, address(0), 20, 0);
+                }
+            }
+        }
+
+        if (bytes(impact).length == 0) {
+            impact = "ETH price stable. The world is in equilibrium.";
+        }
+
+        emit ETHPriceFetched(requestId, price, impact);
     }
 
     // ─── View Functions ────────────────────────────────────────────────────────
