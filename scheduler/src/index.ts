@@ -74,8 +74,11 @@ const GodMindABI = parseAbi([
 
 const ArenaABI = parseAbi([
   "function matchCounter() external view returns (uint256)",
-  "function getMatch(uint256 matchId) external view returns ((uint256,address,address,uint256,uint8,uint8,bytes32,bytes32,uint8,uint8,address,uint256,string))",
+  "function getMatch(uint256 matchId) external view returns ((uint256,address,address,uint256,uint8,uint8,bytes32,bytes32,uint8,uint8,bool,bool,address,uint256,string))",
   "function acceptChallenge(address opponent, uint256 matchId) external",
+  "function proposeChallenge(address challenger, address opponent, uint256 stake, string calldata decisionReason) external returns (uint256 matchId)",
+  "function hasActiveMatch(address) external view returns (bool)",
+  "function activeMatchOf(address) external view returns (uint256)",
   "event MatchResolved(uint256 indexed matchId, address indexed winner, address indexed loser, uint256 stake, uint8 winnerMove, uint8 loserMove, string decisionReason)",
   "event MatchProposed(uint256 indexed matchId, address indexed challenger, address indexed opponent, uint256 stake)",
 ]);
@@ -136,6 +139,76 @@ async function processPendingMatches() {
   } catch {}
 }
 
+// ── Challenge Logic (runs directly from scheduler — deployer is Arena owner) ──
+
+const GOD_PERSONALITIES: Record<string, { aggression: number; riskTolerance: number; name: string }> = {
+  "0xf2d11ea0375971bd3edd6e49330a20c56f7b844f": { aggression: 90, riskTolerance: 75, name: "ARES" },
+  "0x5678d64de049530dee4c1a16ff749d22ac2ee301": { aggression: 40, riskTolerance: 30, name: "ATHENA" },
+  "0x5b407b88d29503929b7d0a0b4a2aabfeb5b2ec1d": { aggression: 60, riskTolerance: 45, name: "HERMES" },
+  "0x874e20598a4ef4d3fbab117d1b175ff1cb5f57be": { aggression: 70, riskTolerance: 95, name: "CHAOS" },
+};
+
+const lastChallengeTime: Record<string, number> = {};
+const CHALLENGE_COOLDOWN_MS = 30_000; // 30s between challenges per god
+
+async function proposeGodChallenges() {
+  for (const god of GODS) {
+    try {
+      const p = GOD_PERSONALITIES[god.address.toLowerCase()];
+      if (!p) continue;
+
+      // Cooldown check
+      const lastTime = lastChallengeTime[god.address] || 0;
+      if (Date.now() - lastTime < CHALLENGE_COOLDOWN_MS) continue;
+
+      // Check if already in a match
+      const inMatch = await publicClient.readContract({
+        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "hasActiveMatch", args: [god.address],
+      }).catch(() => true);
+      if (inMatch) continue;
+
+      // Aggression roll
+      const roll = Math.floor(Math.random() * 100);
+      if (roll >= p.aggression) continue; // idle this round
+
+      // Pick target — any god not in a match that isn't us
+      let target: `0x${string}` | null = null;
+      for (const candidate of GODS) {
+        if (candidate.address.toLowerCase() === god.address.toLowerCase()) continue;
+        const busy = await publicClient.readContract({
+          address: CONTRACTS.Arena, abi: ArenaABI, functionName: "hasActiveMatch", args: [candidate.address],
+        }).catch(() => true);
+        if (!busy) { target = candidate.address; break; }
+      }
+      if (!target) continue;
+
+      const stake = BigInt(Math.floor(500 * p.riskTolerance / 100)) * BigInt(1e18);
+      const targetGod = GODS.find(g => g.address.toLowerCase() === target!.toLowerCase());
+      const reason = `${p.name} challenges ${targetGod?.name || "unknown"} via Markov`;
+
+      console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.yellow(` challenging ${targetGod?.name}…`));
+
+      const hash = await walletClient.writeContract({
+        address: CONTRACTS.Arena,
+        abi: ArenaABI,
+        functionName: "proposeChallenge",
+        args: [god.address, target, stake, reason],
+        account,
+        gas: BigInt(30_000_000),
+      });
+
+      lastChallengeTime[god.address] = Date.now();
+      console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.green(` challenged → ${hash.slice(0, 14)}…`));
+      await sleep(2000);
+    } catch (err: any) {
+      const msg = err?.shortMessage || err?.message || "";
+      if (!msg.includes("GodBusy") && !msg.includes("GodNotActive")) {
+        console.log(chalk.gray(`[challenge] ${msg.slice(0, 80)}`));
+      }
+    }
+  }
+}
+
 // ── Decision Loop ─────────────────────────────────────────────────────────────
 
 const INTERVAL_MS = 15_000; // 15s between decision rounds
@@ -145,13 +218,18 @@ async function runDecisionRound() {
   if (busy) return;
   busy = true;
 
-  // First: accept any pending challenges
+  // Step 1: accept pending challenges
   await processPendingMatches();
+  await sleep(3000); // let nonce settle
 
+  // Step 2: propose new challenges (runs directly, no GodMind needed)
+  await proposeGodChallenges();
+  await sleep(3000); // let nonce settle
+
+  // Step 3: executeDecision for commit/reveal on active matches
   for (let i = 0; i < GODS.length; i++) {
     const god = GODS[i]!;
     try {
-      // Stagger each god by 2s to avoid nonce conflicts
       if (i > 0) await sleep(2000);
 
       const hash = await walletClient.writeContract({
@@ -160,18 +238,14 @@ async function runDecisionRound() {
         functionName: "executeDecision",
         args: [god.address],
         account,
-        gas: BigInt(50_000_000), // Somnia charges much more gas than standard EVM
+        gas: BigInt(50_000_000),
       });
 
       console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.gray(` → ${hash.slice(0, 14)}…`));
     } catch (err: any) {
       const msg = err?.shortMessage || err?.message || "";
-      if (msg.includes("CooldownActive")) {
-        console.log(chalk.gray(`[${god.name}] cooldown`));
-      } else if (msg.includes("GodBusy")) {
-        console.log(chalk.gray(`[${god.name}] in match`));
-      } else {
-        console.error(chalk.red(`[${god.name}] ${msg.slice(0, 100)}`));
+      if (!msg.includes("CooldownActive") && !msg.includes("GodBusy") && !msg.includes("Arithmetic")) {
+        console.error(chalk.red(`[${god.name}] ${msg.slice(0, 80)}`));
       }
     }
   }
