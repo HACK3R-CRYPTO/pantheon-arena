@@ -7,20 +7,26 @@ import { CONTRACTS, GOD_LIST } from "@/lib/contracts/config";
 import { ArenaABI } from "@/lib/contracts/abis";
 import { formatEther } from "viem";
 
-const MOVES = ["✊ Rock", "📄 Paper", "✂️ Scissors"];
-const STATUS_LABEL = ["Pending", "Accepted", "Committed", "Resolved", "Cancelled"];
-const STATUS_COLOR = ["text-yellow-400", "text-blue-400", "text-purple-400", "text-emerald-400", "text-gray-500"];
+const EMOJIS     = ["✊","📄","✂️"];
+const MOVE_NAMES = ["Rock","Paper","Scissors"];
+const STATUS_LABEL = ["Pending","Accepted","Committed","Resolved","Cancelled"];
 
-function godByAddr(a: string) { return GOD_LIST.find(g => g.address.toLowerCase() === a?.toLowerCase()); }
+const GOD_THEME: Record<string, { wall:string; face:string; glow:string }> = {
+  "#EF4444":{ wall:"#7a0000", face:"linear-gradient(160deg,#ff6060 0%,#dc2626 50%,#991b1b 100%)", glow:"rgba(239,68,68,0.5)" },
+  "#EAB308":{ wall:"#6b4a00", face:"linear-gradient(160deg,#fde047 0%,#ca8a04 50%,#854d0e 100%)", glow:"rgba(234,179,8,0.5)"  },
+  "#06B6D4":{ wall:"#004a5a", face:"linear-gradient(160deg,#67e8f9 0%,#0891b2 50%,#0e7490 100%)", glow:"rgba(6,182,212,0.5)"  },
+  "#A855F7":{ wall:"#4a006b", face:"linear-gradient(160deg,#d8b4fe 0%,#9333ea 50%,#6b21a8 100%)", glow:"rgba(168,85,247,0.5)" },
+};
+
+function godByAddr(a: string) { return GOD_LIST.find(x => x.address.toLowerCase() === a?.toLowerCase()); }
 function shortAddr(a: string) { return `${a?.slice(0,6)}…${a?.slice(-4)}`; }
 
 export default function ArenaPage() {
   const [matches, setMatches] = useState<any[]>([]);
-  const [count, setCount] = useState<bigint>(0n);
+  const [count,   setCount]   = useState<bigint>(0n);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (CONTRACTS.Arena === "0x0000000000000000000000000000000000000000") { setLoading(false); return; }
     const fetch = async () => {
       const [raw, cnt] = await Promise.all([
         publicClient.readContract({ address: CONTRACTS.Arena, abi: ArenaABI, functionName: "getRecentMatches", args: [30n] }).catch(() => []),
@@ -38,121 +44,198 @@ export default function ArenaPage() {
   const resolved = matches.filter(m => Number(m.status) === 3).length;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <Link href="/" className="text-sm text-gray-500 hover:text-white transition-colors">← World View</Link>
-          <h1 className="text-3xl font-black text-white mt-2">Arena</h1>
-          <p className="text-gray-500 text-sm">All battles between the gods</p>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-3 text-center">
-            <div className="text-2xl font-black text-white">{count.toString()}</div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider">Total</div>
-          </div>
-          <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-3 text-center">
-            <div className="text-2xl font-black text-emerald-400">{resolved}</div>
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider">Resolved</div>
-          </div>
-        </div>
+    <div style={{ minHeight:"100vh", background:"#04001a" }}>
+      {/* Background glow */}
+      <div style={{ position:"fixed", inset:0, zIndex:0, pointerEvents:"none" }}>
+        <div style={{ position:"absolute", top:"-10%", left:"20%", width:500, height:500, borderRadius:"50%",
+          background:"radial-gradient(circle,rgba(109,40,217,0.1) 0%,transparent 70%)" }} />
       </div>
 
-      {loading ? (
-        <div className="space-y-3 animate-pulse">
-          {[...Array(5)].map((_, i) => <div key={i} className="h-28 bg-[var(--card)] rounded-xl" />)}
+      <div style={{ maxWidth:900, margin:"0 auto", padding:"48px 20px", position:"relative", zIndex:1 }}>
+
+        {/* Header */}
+        <div style={{ marginBottom:36 }}>
+          <Link href="/" style={{ fontSize:12, color:"rgba(180,160,255,0.6)", fontWeight:700,
+            letterSpacing:"0.08em", textDecoration:"none", display:"inline-flex", alignItems:"center", gap:6, marginBottom:16 }}>
+            ← WORLD VIEW
+          </Link>
+
+          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
+            <div>
+              <h1 style={{ fontWeight:900, fontSize:36, color:"white", letterSpacing:"-0.01em", marginBottom:4 }}>
+                ARENA
+              </h1>
+              <p style={{ color:"rgba(180,160,255,0.5)", fontSize:13 }}>All battles between the gods</p>
+            </div>
+
+            {/* Stats */}
+            <div style={{ display:"flex", gap:12 }}>
+              {[
+                { val: count.toString(), label:"Total Matches", wall:"#3b0764", face:"linear-gradient(160deg,#c084fc 0%,#7c3aed 50%,#4c1d95 100%)", glow:"rgba(124,58,237,0.6)" },
+                { val: String(resolved), label:"Resolved",      wall:"#064e3b", face:"linear-gradient(160deg,#6ee7b7 0%,#059669 50%,#065f46 100%)", glow:"rgba(5,150,105,0.6)"  },
+              ].map(s => (
+                <div key={s.label} style={{ borderRadius:14, background:s.wall, paddingBottom:5, boxShadow:`0 10px 24px -4px ${s.glow}` }}>
+                  <div style={{
+                    borderRadius:"12px 12px 10px 10px", background:s.face, padding:"12px 18px", textAlign:"center",
+                    border:"2px solid rgba(255,255,255,0.4)", position:"relative", overflow:"hidden",
+                    boxShadow:"inset 0 6px 16px rgba(255,255,255,0.55), inset 0 -3px 6px rgba(0,0,0,0.3)",
+                  }}>
+                    <div style={{ position:"absolute", top:2, left:"8%", right:"8%", height:"44%",
+                      background:"linear-gradient(180deg,rgba(255,255,255,0.55) 0%,transparent 100%)",
+                      borderRadius:"12px 12px 50px 50px", pointerEvents:"none" }} />
+                    <div style={{ position:"relative", zIndex:1 }}>
+                      <div style={{ fontWeight:900, fontSize:22, color:"white", textShadow:"0 2px 4px rgba(0,0,0,0.4)" }}>{s.val}</div>
+                      <div style={{ fontSize:9, color:"rgba(255,255,255,0.7)", letterSpacing:"0.1em", fontWeight:800 }}>{s.label}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-      ) : matches.length === 0 ? (
-        <div className="text-center py-20">
-          <div className="text-5xl mb-4">⚔️</div>
-          <p className="text-white font-bold text-lg">No battles yet</p>
-          <p className="text-gray-500 text-sm mt-1">The gods are preparing…</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {matches.map((m, i) => <MatchRow key={i} match={m} />)}
-        </div>
-      )}
+
+        {/* Match list */}
+        {loading ? (
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            {[...Array(5)].map((_,i) => (
+              <div key={i} style={{ height:100, borderRadius:16, background:"rgba(109,40,217,0.08)", border:"1px solid rgba(109,40,217,0.15)", animation:"pulse 2s infinite" }} />
+            ))}
+          </div>
+        ) : matches.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"80px 20px" }}>
+            <div style={{ fontSize:56, marginBottom:16 }}>⚔️</div>
+            <p style={{ fontWeight:800, color:"white", fontSize:18, marginBottom:8 }}>No battles yet</p>
+            <p style={{ color:"rgba(180,160,255,0.5)", fontSize:13 }}>The gods are preparing…</p>
+          </div>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            {matches.map((m, i) => <MatchRow key={i} match={m} />)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 function MatchRow({ match }: { match: any }) {
-  const status = Number(match.status);
-  const challenger = godByAddr(match.challenger);
-  const opponent   = godByAddr(match.opponent);
+  const status    = Number(match.status);
   const isResolved = status === 3;
-  const winner     = isResolved ? godByAddr(match.winner) : null;
-  const loser      = isResolved ? godByAddr(match.winner === match.challenger ? match.opponent : match.challenger) : null;
+  const winnerAddr = match.winner;
+  const loserAddr  = winnerAddr === match.challenger ? match.opponent : match.challenger;
+  const win  = godByAddr(winnerAddr);
+  const los  = godByAddr(loserAddr);
+  const chal = godByAddr(match.challenger);
+  const opp  = godByAddr(match.opponent);
+  const t    = win ? GOD_THEME[win.color] : undefined;
 
-  const wMove = isResolved ? (match.winner === match.challenger ? match.challengerMove : match.opponentMove) : null;
-  const lMove = isResolved ? (match.winner === match.challenger ? match.opponentMove : match.challengerMove) : null;
+  const wMove = isResolved ? (winnerAddr===match.challenger ? match.challengerMove : match.opponentMove) : null;
+  const lMove = isResolved ? (winnerAddr===match.challenger ? match.opponentMove : match.challengerMove) : null;
 
   return (
-    <div className="battle-card p-5">
-      <div className="flex items-start justify-between gap-4">
-        {/* Participants */}
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          {isResolved ? (
-            <>
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-2xl">{MOVES[wMove ?? 0]?.split(" ")[0]}</span>
-                <Link href={`/god/${match.winner}`} className="font-black text-lg hover:opacity-80 truncate" style={{ color: winner?.color ?? "#fff" }}>
-                  {winner?.name ?? shortAddr(match.winner)}
+    <div style={{
+      borderRadius:18, paddingBottom:5,
+      background: t?.wall ?? "#1a0550",
+      boxShadow: `0 10px 30px -6px ${t?.glow ?? "rgba(109,40,217,0.4)"}`,
+    }}>
+      <div style={{
+        borderRadius:"16px 16px 14px 14px",
+        background: isResolved ? (t?.face ?? "linear-gradient(160deg,#6d28d9 0%,#3b0764 100%)") : "linear-gradient(160deg,#2a0c6e 0%,#1a0550 100%)",
+        border:"2px solid rgba(255,255,255,0.3)",
+        boxShadow:"inset 0 6px 16px rgba(255,255,255,0.45), inset 0 -2px 6px rgba(0,0,0,0.3)",
+        padding:"16px 20px", position:"relative", overflow:"hidden",
+      }}>
+        {/* Gloss */}
+        <div style={{ position:"absolute", top:2, left:"4%", right:"4%", height:"42%",
+          background:"linear-gradient(180deg,rgba(255,255,255,0.45) 0%,transparent 100%)",
+          borderRadius:"16px 16px 60px 60px", pointerEvents:"none" }} />
+
+        <div style={{ position:"relative", zIndex:1 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
+
+            {/* Match display */}
+            {isResolved ? (
+              <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+                {/* Winner */}
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:28 }}>{EMOJIS[wMove ?? 0] ?? "?"}</span>
+                  <div>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <Link href={`/god/${winnerAddr}`} style={{ fontWeight:900, fontSize:18, color:"white", textDecoration:"none", textShadow:"0 2px 6px rgba(0,0,0,0.5)" }}>
+                        {win?.name ?? shortAddr(winnerAddr)}
+                      </Link>
+                      <span style={{ fontSize:9, fontWeight:800, padding:"2px 8px", borderRadius:999,
+                        background:"rgba(16,185,129,0.3)", border:"1px solid rgba(16,185,129,0.5)", color:"#4ade80" }}>
+                        WINNER
+                      </span>
+                    </div>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.6)" }}>{MOVE_NAMES[wMove ?? 0]}</div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize:18, color:"rgba(255,255,255,0.4)", fontWeight:900 }}>VS</div>
+
+                {/* Loser */}
+                <div style={{ display:"flex", alignItems:"center", gap:10, opacity:0.55 }}>
+                  <span style={{ fontSize:24 }}>{EMOJIS[lMove ?? 0] ?? "?"}</span>
+                  <div>
+                    <Link href={`/god/${loserAddr}`} style={{ fontWeight:700, fontSize:15, color:"white", textDecoration:"none" }}>
+                      {los?.name ?? shortAddr(loserAddr)}
+                    </Link>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.5)" }}>{MOVE_NAMES[lMove ?? 0]}</div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                <Link href={`/god/${match.challenger}`} style={{ fontWeight:900, fontSize:16, textDecoration:"none", color: chal?.color ?? "white" }}>
+                  {chal?.name ?? shortAddr(match.challenger)}
                 </Link>
-                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                  WINNER
+                <span style={{ color:"rgba(255,255,255,0.4)", fontWeight:900 }}>VS</span>
+                <Link href={`/god/${match.opponent}`} style={{ fontWeight:900, fontSize:16, textDecoration:"none", color: opp?.color ?? "rgba(200,180,255,0.7)" }}>
+                  {opp?.name ?? shortAddr(match.opponent)}
+                </Link>
+              </div>
+            )}
+
+            {/* Right side */}
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
+              <span style={{
+                fontSize:10, fontWeight:800, padding:"3px 10px", borderRadius:999,
+                ...(isResolved
+                  ? { background:"rgba(16,185,129,0.25)", border:"1px solid rgba(16,185,129,0.4)", color:"#4ade80" }
+                  : status===1 ? { background:"rgba(59,130,246,0.2)", border:"1px solid rgba(59,130,246,0.4)", color:"#93c5fd" }
+                  : status===2 ? { background:"rgba(168,85,247,0.2)", border:"1px solid rgba(168,85,247,0.4)", color:"#d8b4fe" }
+                  : { background:"rgba(251,191,36,0.2)", border:"1px solid rgba(251,191,36,0.4)", color:"#fde047" }
+                )
+              }}>
+                {STATUS_LABEL[status] ?? "Unknown"}
+              </span>
+              {isResolved && (
+                <span style={{ fontWeight:900, fontSize:14, color:"#4ade80", textShadow:"0 0 10px rgba(74,222,128,0.4)" }}>
+                  +{parseFloat(formatEther(match.stake ?? 0n)).toFixed(0)} PHN
                 </span>
-              </div>
+              )}
+              {!isResolved && (
+                <span style={{ fontSize:11, color:"rgba(255,255,255,0.5)", fontWeight:700 }}>
+                  {parseFloat(formatEther(match.stake ?? 0n)).toFixed(0)} PHN
+                </span>
+              )}
+            </div>
+          </div>
 
-              <div className="text-2xl text-gray-600 font-black">vs</div>
-
-              <div className="flex flex-col items-center gap-1 opacity-60">
-                <span className="text-2xl">{MOVES[lMove ?? 0]?.split(" ")[0]}</span>
-                <Link href={`/god/${match.winner === match.challenger ? match.opponent : match.challenger}`}
-                  className="font-bold text-lg hover:opacity-80 truncate" style={{ color: loser?.color ?? "#888" }}>
-                  {loser?.name ?? shortAddr(match.opponent)}
-                </Link>
-              </div>
-            </>
-          ) : (
-            <>
-              <Link href={`/god/${match.challenger}`} className="font-black hover:opacity-80" style={{ color: challenger?.color ?? "#fff" }}>
-                {challenger?.name ?? shortAddr(match.challenger)}
-              </Link>
-              <span className="text-gray-600 font-bold">vs</span>
-              <Link href={`/god/${match.opponent}`} className="font-black hover:opacity-80" style={{ color: opponent?.color ?? "#888" }}>
-                {opponent?.name ?? shortAddr(match.opponent)}
-              </Link>
-            </>
+          {/* Reasoning + block */}
+          {match.decisionReason && (
+            <div style={{ marginTop:10, fontSize:10, fontFamily:"monospace",
+              color:"rgba(255,255,255,0.4)", background:"rgba(0,0,0,0.25)",
+              borderRadius:8, padding:"5px 10px", border:"1px solid rgba(255,255,255,0.08)",
+              overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
+              <span style={{ color:"#c084fc" }}>&gt;</span> {match.decisionReason}
+            </div>
           )}
+          <div style={{ marginTop:6, fontSize:9, color:"rgba(255,255,255,0.3)", fontFamily:"monospace" }}>
+            Match #{match.id?.toString()} · Block #{match.createdBlock?.toString()}
+          </div>
         </div>
-
-        {/* Right side */}
-        <div className="flex flex-col items-end gap-1 shrink-0">
-          <span className={`text-xs font-bold ${STATUS_COLOR[status] ?? "text-gray-400"}`}>
-            {STATUS_LABEL[status] ?? "Unknown"}
-          </span>
-          <span className="text-sm font-bold text-yellow-400">
-            {parseFloat(formatEther(match.stake ?? 0n)).toFixed(0)} PHN
-          </span>
-          {isResolved && (
-            <span className="text-emerald-400 text-sm font-black">
-              +{(parseFloat(formatEther(match.stake ?? 0n))).toFixed(0)} PHN
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Reasoning */}
-      {match.decisionReason && (
-        <div className="mt-3 text-xs font-mono text-gray-500 bg-[var(--bg)] rounded-lg px-3 py-2 line-clamp-1">
-          <span className="text-purple-400">&gt;</span> {match.decisionReason}
-        </div>
-      )}
-
-      <div className="text-[10px] text-gray-600 font-mono mt-2">
-        Match #{match.id?.toString()} · Block #{match.createdBlock?.toString()}
       </div>
     </div>
   );

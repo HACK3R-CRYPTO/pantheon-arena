@@ -1,18 +1,18 @@
 @import "tailwindcss";
 
+/* ── GameArenaCelo color system ─────────────────────────────── */
 :root {
-  --ares:   #ef4444;
-  --athena: #eab308;
-  --hermes: #06b6d4;
-  --chaos:  #a855f7;
-  --bg:     #06060e;
-  --card:   #0c0c1a;
-  --card2:  #10101e;
-  --border: #1a1a30;
-  --text:   #f0f0ff;
-  --muted:  #64748b;
-  --green:  #10b981;
-  --gold:   #f59e0b;
+  --bg:      #04001a;
+  --bg2:     #07021a;
+  --panel:   #0d0530;
+  --purple1: #1a0550;
+  --purple2: #2a0c6e;
+  --border:  rgba(255,255,255,0.1);
+  --glow:    rgba(109,40,217,0.5);
+  --muted:   rgba(220,200,255,0.55);
+  --text:    #f0eeff;
+  --green:   #10b981;
+  --gold:    #f59e0b;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -20,124 +20,49 @@
 html, body {
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: system-ui, -apple-system, sans-serif;
   min-height: 100vh;
   overscroll-behavior: none;
 }
 
-/* ── Core Animations ─────────────────────────────────────────── */
-@keyframes pulse-live {
+/* ── Floating icon animation (GameArenaCelo style) ──────────── */
+@keyframes icon-float {
+  0%, 100% { transform: translateY(0px) rotate(var(--rot, 0deg)); }
+  50%       { transform: translateY(-12px) rotate(var(--rot, 0deg)); }
+}
+.icon-float { animation: icon-float var(--dur, 5s) ease-in-out infinite var(--delay, 0s); }
+
+/* ── Other animations ───────────────────────────────────────── */
+@keyframes pulse-glow {
   0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--green); }
-  50%       { opacity: 0.5; box-shadow: 0 0 12px var(--green); }
+  50%       { opacity: 0.5; box-shadow: 0 0 14px var(--green); }
 }
 @keyframes slide-in {
-  from { opacity: 0; transform: translateX(12px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes pop-in {
-  0%   { opacity: 0; transform: scale(0.92); }
-  60%  { transform: scale(1.02); }
+  0%   { opacity: 0; transform: scale(0.9); }
+  70%  { transform: scale(1.03); }
   100% { opacity: 1; transform: scale(1); }
 }
-@keyframes glow-pulse {
-  0%, 100% { opacity: 0.6; }
-  50%       { opacity: 1; }
-}
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-5px); }
-}
-@keyframes crown-bounce {
-  0%, 100% { transform: translateY(0) rotate(-5deg); }
-  50%       { transform: translateY(-4px) rotate(5deg); }
-}
-@keyframes war-shake {
-  0%, 100% { transform: translateX(0); }
-  25%       { transform: translateX(-2px); }
-  75%       { transform: translateX(2px); }
+@keyframes crown {
+  0%, 100% { transform: translateY(0) rotate(-8deg); }
+  50%       { transform: translateY(-5px) rotate(8deg); }
 }
 
-.live-pulse { animation: pulse-live 2s ease-in-out infinite; }
-.slide-in   { animation: slide-in 0.25s ease-out forwards; }
-.pop-in     { animation: pop-in 0.3s ease-out forwards; }
-.float-anim { animation: float 3.5s ease-in-out infinite; }
-.crown-anim { animation: crown-bounce 1.5s ease-in-out infinite; }
-.war-shake  { animation: war-shake 0.4s ease-in-out; }
-
-/* ── Cards ───────────────────────────────────────────────────── */
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--green);
+  animation: pulse-glow 2s ease-in-out infinite;
 }
+.slide-in { animation: slide-in 0.25s ease-out both; }
+.pop-in   { animation: pop-in 0.3s cubic-bezier(0.16,1,0.3,1) both; }
+.crown    { animation: crown 1.8s ease-in-out infinite; display: inline-block; }
 
-.god-card {
-  background: var(--card);
-  border-radius: 20px;
-  border: 1.5px solid var(--border);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-  cursor: pointer;
-  overflow: hidden;
-}
-.god-card:hover {
-  transform: translateY(-3px) scale(1.01);
-}
-.god-card:active { transform: scale(0.98); }
+/* ── 3D Wall+Face card mixin ────────────────────────────────── */
+/* Use with inline styles for wall/face colors */
 
-.battle-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  transition: border-color 0.15s;
-}
-.battle-card:hover { border-color: #2a2a45; }
-
-/* ── Badges ──────────────────────────────────────────────────── */
-.badge-war     { background: rgba(239,68,68,0.12);  color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
-.badge-rival   { background: rgba(251,146,60,0.12); color: #fb923c; border: 1px solid rgba(251,146,60,0.25); }
-.badge-allied  { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
-.badge-neutral { background: rgba(100,116,139,0.12); color: #94a3b8; border: 1px solid rgba(100,116,139,0.2); }
-
-.tag {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 3px 8px;
-  border-radius: 999px;
-}
-
-/* ── Power bar ───────────────────────────────────────────────── */
-.bar-track { height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; }
-.bar-fill  { height: 100%; border-radius: 999px; transition: width 1s cubic-bezier(0.4,0,0.2,1); }
-
-/* ── God portrait placeholder ────────────────────────────────── */
-.god-portrait {
-  width: 64px; height: 64px;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 28px;
-  font-weight: 900;
-  flex-shrink: 0;
-}
-
-/* ── Scrollbar ───────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-/* ── Stat pill ───────────────────────────────────────────────── */
-.stat-pill {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 10px;
-  text-align: center;
-  flex: 1;
-}
-
-/* ── Live dot ────────────────────────────────────────────────── */
-.dot-live {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--green);
-  animation: pulse-live 2s ease-in-out infinite;
-}
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
