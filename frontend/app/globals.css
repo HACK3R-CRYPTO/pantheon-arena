@@ -1,16 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --ares:    #EF4444;
-  --athena:  #EAB308;
-  --hermes:  #06B6D4;
-  --chaos:   #A855F7;
-  --bg:      #08080f;
-  --card:    #0e0e1a;
-  --border:  #1e1e35;
-  --text:    #f0f0ff;
-  --muted:   #6b7280;
-  --green:   #10b981;
+  --ares:   #ef4444;
+  --athena: #eab308;
+  --hermes: #06b6d4;
+  --chaos:  #a855f7;
+  --bg:     #06060e;
+  --card:   #0c0c1a;
+  --card2:  #10101e;
+  --border: #1a1a30;
+  --text:   #f0f0ff;
+  --muted:  #64748b;
+  --green:  #10b981;
+  --gold:   #f59e0b;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -18,96 +20,124 @@
 html, body {
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   min-height: 100vh;
   overscroll-behavior: none;
 }
 
-/* ── Animations ──────────────────────────────────────────────── */
-@keyframes pulse-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+/* ── Core Animations ─────────────────────────────────────────── */
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--green); }
+  50%       { opacity: 0.5; box-shadow: 0 0 12px var(--green); }
 }
-@keyframes slide-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
-@keyframes battle-flash {
-  0%   { background: rgba(239,68,68,0.15); }
-  100% { background: transparent; }
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(0.92); }
+  60%  { transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
 }
 @keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50%       { transform: translateY(-6px); }
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-5px); }
 }
-@keyframes shimmer {
-  from { background-position: -200% 0; }
-  to   { background-position: 200% 0; }
+@keyframes crown-bounce {
+  0%, 100% { transform: translateY(0) rotate(-5deg); }
+  50%       { transform: translateY(-4px) rotate(5deg); }
+}
+@keyframes war-shake {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-2px); }
+  75%       { transform: translateX(2px); }
 }
 
-.pulse        { animation: pulse-glow 1.8s ease-in-out infinite; }
-.slide-up     { animation: slide-up 0.3s ease-out forwards; }
-.float-anim   { animation: float 4s ease-in-out infinite; }
-.battle-flash { animation: battle-flash 0.6s ease-out; }
+.live-pulse { animation: pulse-live 2s ease-in-out infinite; }
+.slide-in   { animation: slide-in 0.25s ease-out forwards; }
+.pop-in     { animation: pop-in 0.3s ease-out forwards; }
+.float-anim { animation: float 3.5s ease-in-out infinite; }
+.crown-anim { animation: crown-bounce 1.5s ease-in-out infinite; }
+.war-shake  { animation: war-shake 0.4s ease-in-out; }
 
 /* ── Cards ───────────────────────────────────────────────────── */
-.god-card {
+.card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
-  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
-  cursor: pointer;
-}
-.god-card:hover {
-  transform: translateY(-2px);
 }
 
-/* ── Battle card ─────────────────────────────────────────────── */
+.god-card {
+  background: var(--card);
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  cursor: pointer;
+  overflow: hidden;
+}
+.god-card:hover {
+  transform: translateY(-3px) scale(1.01);
+}
+.god-card:active { transform: scale(0.98); }
+
 .battle-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  transition: border-color 0.2s;
+  border-radius: 14px;
+  transition: border-color 0.15s;
 }
-.battle-card:hover { border-color: #2e2e50; }
+.battle-card:hover { border-color: #2a2a45; }
 
-/* ── Relation badges ─────────────────────────────────────────── */
-.badge-war     { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
-.badge-rival   { background: rgba(251,146,60,0.15); color: #fb923c; border: 1px solid rgba(251,146,60,0.3); }
-.badge-allied  { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
-.badge-neutral { background: rgba(107,114,128,0.15); color: #6b7280; border: 1px solid rgba(107,114,128,0.3); }
+/* ── Badges ──────────────────────────────────────────────────── */
+.badge-war     { background: rgba(239,68,68,0.12);  color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+.badge-rival   { background: rgba(251,146,60,0.12); color: #fb923c; border: 1px solid rgba(251,146,60,0.25); }
+.badge-allied  { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
+.badge-neutral { background: rgba(100,116,139,0.12); color: #94a3b8; border: 1px solid rgba(100,116,139,0.2); }
+
+.tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
 
 /* ── Power bar ───────────────────────────────────────────────── */
-.power-bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
+.bar-track { height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; }
+.bar-fill  { height: 100%; border-radius: 999px; transition: width 1s cubic-bezier(0.4,0,0.2,1); }
+
+/* ── God portrait placeholder ────────────────────────────────── */
+.god-portrait {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+  font-weight: 900;
+  flex-shrink: 0;
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* ── Glass effect ────────────────────────────────────────────── */
-.glass {
-  background: rgba(14,14,26,0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-/* ── Gradient text ───────────────────────────────────────────── */
-.gradient-text {
-  background: linear-gradient(135deg, #fff 0%, #a78bfa 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* ── Stat pill ───────────────────────────────────────────────── */
+.stat-pill {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: center;
+  flex: 1;
 }
 
 /* ── Live dot ────────────────────────────────────────────────── */
-.live-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
+.dot-live {
+  width: 7px; height: 7px; border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 8px var(--green);
+  animation: pulse-live 2s ease-in-out infinite;
 }
