@@ -6,43 +6,18 @@ import {Arena} from "./Arena.sol";
 import {WorldState} from "./WorldState.sol";
 import {IAgentRequester, IAgentRequesterHandler, ILLMAgent} from "./interfaces/ISomniaAgents.sol";
 
-/// @notice The decision engine for each god.
-///
-///         PRIMARY PATH — Somnia LLM Inference:
-///           1. requestDecision() builds a prompt from the god's onchain personality + world state
-///           2. Sends to Somnia platform via createRequest()
-///           3. Somnia validators independently run the LLM and reach consensus
-///           4. handleResponse() receives the consensus result and executes the god's move
-///           5. The entire flow is onchain, verifiable, and auditable forever
-///
-///         FALLBACK PATH — Markov predictor:
-///           If LLM Inference is unavailable or times out, the Markov chain runs
-///           deterministically onchain using the opponent's move history.
-///
-///         Every decision is permanently logged on chain — the reasoning is public record.
+/// @notice God decision engine. Calls Somnia LLM Inference for moves; falls back to Markov.
+///         Every decision is permanently logged onchain — the AI reasoning is public record.
 contract GodMind is IAgentRequesterHandler {
 
-    // ── Somnia Agent config ────────────────────────────────────────────────────
-
-    /// @notice Somnia Agents platform — testnet: 0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
     IAgentRequester public agentPlatform;
-
-    /// @notice LLM Inference agent ID — confirmed on Somnia testnet
     uint256 public llmAgentId;
-
-    /// @notice Cost per LLM request: 0.07 STT/agent × 3 validators + 0.03 reserve = 0.24 STT
-    uint256 public constant LLM_COST_PER_AGENT  = 0.07 ether;
-    uint256 public constant DEFAULT_SUBCOMMITTEE = 3;
-    uint256 public constant LLM_TOTAL_COST = LLM_COST_PER_AGENT * DEFAULT_SUBCOMMITTEE + 0.03 ether;
-
-    // ── Core contracts ─────────────────────────────────────────────────────────
+    uint256 public constant LLM_TOTAL_COST = 0.24 ether; // 0.07 x 3 + 0.03 reserve
 
     GodRegistry public registry;
     Arena public arena;
     WorldState public worldState;
     address public owner;
-
-    // ── Decision log ───────────────────────────────────────────────────────────
 
     struct DecisionLog {
         uint256 blockNumber;
@@ -52,34 +27,26 @@ contract GodMind is IAgentRequesterHandler {
         uint256 stake;
         uint8 move;
         string reasoning;
-        bool usedLLM;       // true = Somnia LLM Inference, false = Markov fallback
+        bool usedLLM;
     }
-
-    mapping(address => DecisionLog[]) public decisionHistory;
-    uint256 public totalDecisions;
-    uint256 public llmDecisions;    // Track how many used real LLM
-
-    // ── Pending LLM requests ───────────────────────────────────────────────────
 
     struct PendingRequest {
         address god;
         address target;
         uint256 stake;
-        uint256 matchId;        // 0 = challenge decision, >0 = move decision in existing match
-        uint8 markovFallback;   // Pre-computed move if LLM fails
-        string context;         // Snapshot of world state at request time
+        uint256 matchId;
+        uint8 markovFallback;
     }
 
-    mapping(uint256 => PendingRequest) public pendingRequests; // requestId => pending
-
-    // ── Cooldown ───────────────────────────────────────────────────────────────
+    mapping(address => DecisionLog[]) public decisionHistory;
+    mapping(uint256 => PendingRequest) public pendingRequests;
+    uint256 public totalDecisions;
+    uint256 public llmDecisions;
 
     uint256 public constant CHALLENGE_COOLDOWN_BLOCKS = 10;
     mapping(address => uint256) public lastChallengeBlock;
     mapping(address => mapping(uint256 => bytes32)) private pendingSecrets;
     mapping(address => mapping(uint256 => uint8)) private pendingMoves;
-
-    // ── Events ─────────────────────────────────────────────────────────────────
 
     event LLMDecisionRequested(address indexed god, uint256 requestId, string prompt);
     event LLMDecisionReceived(address indexed god, uint256 requestId, string result, bool success);
@@ -87,8 +54,6 @@ contract GodMind is IAgentRequesterHandler {
     event MarkovFallback(address indexed god, string reason);
 
     error Unauthorized();
-    error InsufficientBalance();
-    error CooldownActive();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert Unauthorized();
@@ -115,190 +80,169 @@ contract GodMind is IAgentRequesterHandler {
         llmAgentId = _agentId;
     }
 
-    // ─── Core Decision Entry Point ─────────────────────────────────────────────
+    // ─── Entry Point ────────────────────────────────────────────────────────────
 
-    /// @notice Called by the scheduler to trigger a god's decision cycle.
-    ///         Msg.sender must be the god's own address or the owner.
     function executeDecision(address god) external {
-        if (msg.sender != god && msg.sender != owner) revert Unauthorized();
+        if (msg.sender != owner) revert Unauthorized();
+        if (!registry.getStats(god).active) return;
 
-        GodRegistry.GodStats memory stats = registry.getStats(god);
-        if (!stats.active) return;
-
-        bool hasMatch = arena.hasActiveMatch(god);
-
-        if (hasMatch) {
-            uint256 matchId = arena.activeMatchOf(god);
-            Arena.Match memory m = arena.getMatch(matchId);
-            _handleActiveMatch(god, matchId, m);
+        if (arena.hasActiveMatch(god)) {
+            _handleMatch(god, arena.activeMatchOf(god));
         } else {
             _handleIdle(god);
         }
     }
 
-    // ─── Active Match Handler ──────────────────────────────────────────────────
+    // ─── Match Handler ─────────────────────────────────────────────────────────
 
-    function _handleActiveMatch(address god, uint256 matchId, Arena.Match memory m) internal {
+    function _handleMatch(address god, uint256 matchId) internal {
+        Arena.Match memory m = arena.getMatch(matchId);
         if (m.status == Arena.MatchStatus.ACCEPTED) {
-            _requestMoveDecision(god, matchId, m);
+            _doCommit(god, matchId, m);
         } else if (m.status == Arena.MatchStatus.COMMITTED) {
-            _revealDecision(god, matchId);
+            _doReveal(god, matchId);
         }
     }
 
-    /// @notice Request a move decision via Somnia LLM Inference.
-    ///         Falls back to Markov if LLM balance insufficient.
-    function _requestMoveDecision(address god, uint256 matchId, Arena.Match memory m) internal {
-        GodRegistry.GodPersonality memory p = registry.getPersonality(god);
-        address opponent = m.challenger == god ? m.opponent : m.challenger;
-        GodRegistry.GodPersonality memory op = registry.getPersonality(opponent);
-        GodRegistry.GodStats memory opStats = registry.getStats(opponent);
+    function _doCommit(address god, uint256 matchId, Arena.Match memory m) internal {
+        address opp = m.challenger == god ? m.opponent : m.challenger;
+        GodRegistry.GodPersonality memory gp = registry.getPersonality(god);
+        uint8 markovMove = _markovPredict(opp, gp.adaptability, gp.favoredMove);
 
-        uint8 markovMove = _markovPredict(opponent, p);
-
-        // Try LLM Inference if funded
         if (address(this).balance >= LLM_TOTAL_COST && llmAgentId != 0) {
-            string memory prompt = _buildMovePrompt(p, op, opStats, matchId, m.stake);
-            string[] memory allowedValues = new string[](3);
-            allowedValues[0] = "0"; allowedValues[1] = "1"; allowedValues[2] = "2";
-
-            bytes memory payload = abi.encodeWithSelector(
-                ILLMAgent.inferNumber.selector,
-                prompt,
-                p.lore,
-                int256(0),
-                int256(2),
-                false
-            );
-
-            uint256 requestId = agentPlatform.createRequest{value: LLM_TOTAL_COST}(
-                llmAgentId,
-                address(this),
-                this.handleResponse.selector,
-                payload
-            );
-
-            pendingRequests[requestId] = PendingRequest({
-                god: god,
-                target: opponent,
-                stake: m.stake,
-                matchId: matchId,
-                markovFallback: markovMove,
-                context: prompt
-            });
-
-            emit LLMDecisionRequested(god, requestId, prompt);
+            _requestLLMMove(god, opp, matchId, m.stake, markovMove);
         } else {
-            // Markov fallback
-            emit MarkovFallback(god, address(this).balance < LLM_TOTAL_COST ? "Insufficient balance" : "Agent not configured");
-            _commitWithMove(god, matchId, markovMove, opponent, m.stake,
-                string(abi.encodePacked(p.name, " uses Markov predictor. Predicted opponent move: ", _uint2str(markovMove), ".")),
-                false
-            );
+            emit MarkovFallback(god, "Insufficient balance");
+            _commitMove(god, matchId, markovMove, opp, m.stake, "Markov predictor", false);
         }
     }
 
-    // ─── Somnia LLM Callback ───────────────────────────────────────────────────
+    function _requestLLMMove(address god, address opp, uint256 matchId, uint256 stake, uint8 markovMove) internal {
+        GodRegistry.GodPersonality memory p = registry.getPersonality(god);
+        GodRegistry.GodStats memory os = registry.getStats(opp);
 
-    /// @notice Called by Somnia validators after consensus on LLM output.
-    ///         This IS the onchain AI decision — consensus-validated across multiple validators.
+        string memory prompt = _movePrompt(p.name, registry.getPersonality(opp).name, os.wins, os.losses, matchId);
+
+        bytes memory payload = abi.encodeWithSelector(
+            ILLMAgent.inferNumber.selector,
+            prompt,
+            p.lore,
+            int256(0),
+            int256(2),
+            false
+        );
+
+        uint256 requestId = agentPlatform.createRequest{value: LLM_TOTAL_COST}(
+            llmAgentId,
+            address(this),
+            this.handleResponse.selector,
+            payload
+        );
+
+        pendingRequests[requestId] = PendingRequest(god, opp, stake, matchId, markovMove);
+        emit LLMDecisionRequested(god, requestId, prompt);
+    }
+
+    function _movePrompt(
+        string memory godName,
+        string memory oppName,
+        uint256 oppWins,
+        uint256 oppLosses,
+        uint256 matchId
+    ) internal pure returns (string memory) {
+        string memory part1 = string(abi.encodePacked("You are ", godName, " in match #", _u(matchId), "."));
+        string memory part2 = string(abi.encodePacked(" vs ", oppName, " (", _u(oppWins), "W/", _u(oppLosses), "L)."));
+        string memory part3 = " Choose 0=Rock 1=Paper 2=Scissors. Return ONLY 0, 1, or 2.";
+        return string(abi.encodePacked(part1, part2, part3));
+    }
+
+    function _doReveal(address god, uint256 matchId) internal {
+        bytes32 secret = pendingSecrets[god][matchId];
+        if (secret == bytes32(0)) return;
+        uint8 move = pendingMoves[god][matchId];
+        arena.revealMove(god, matchId, move, secret);
+        delete pendingSecrets[god][matchId];
+        delete pendingMoves[god][matchId];
+    }
+
+    // ─── LLM Callback ─────────────────────────────────────────────────────────
+
     function handleResponse(
         uint256 requestId,
         IAgentRequester.Response[] memory responses,
         IAgentRequester.ResponseStatus status,
-        IAgentRequester.Request memory /* details */
+        IAgentRequester.Request memory
     ) external override {
-        require(msg.sender == address(agentPlatform), "Only Somnia platform");
-
+        require(msg.sender == address(agentPlatform), "Only platform");
         PendingRequest memory req = pendingRequests[requestId];
         if (req.god == address(0)) return;
         delete pendingRequests[requestId];
 
-        bool success = status == IAgentRequester.ResponseStatus.Success && responses.length > 0;
         uint8 move = req.markovFallback;
-        string memory reasoning = "LLM timed out. Markov fallback used.";
+        bool usedLLM = false;
+        string memory reason = "LLM failed. Markov fallback.";
 
-        if (success) {
-            // Decode the LLM's move decision (0=Rock, 1=Paper, 2=Scissors)
-            try this.decodeNumberResponse(responses[0].result) returns (int256 llmMove) {
-                if (llmMove >= 0 && llmMove <= 2) {
-                    move = uint8(uint256(llmMove));
-                    reasoning = string(abi.encodePacked(
-                        "Somnia LLM Inference (consensus-validated). Move: ", _uint2str(move), ". ",
-                        "Request ID: ", _uint2str(requestId), "."
-                    ));
+        if (status == IAgentRequester.ResponseStatus.Success && responses.length > 0) {
+            try this.decodeInt(responses[0].result) returns (int256 v) {
+                if (v >= 0 && v <= 2) {
+                    move = uint8(uint256(v));
+                    usedLLM = true;
                     llmDecisions++;
+                    reason = string(abi.encodePacked("Somnia LLM. Move:", _u(move), " Req#", _u(requestId)));
                 }
-            } catch {
-                reasoning = "LLM response decode failed. Markov fallback used.";
-            }
+            } catch {}
         }
 
-        emit LLMDecisionReceived(req.god, requestId, reasoning, success);
+        emit LLMDecisionReceived(req.god, requestId, reason, usedLLM);
 
         if (req.matchId > 0) {
-            _commitWithMove(req.god, req.matchId, move, req.target, req.stake, reasoning, success);
+            _commitMove(req.god, req.matchId, move, req.target, req.stake, reason, usedLLM);
         } else {
-            // Challenge decision — execute with the move as preferred
-            _executeChallenge(req.god, req.target, req.stake, reasoning);
+            _executeChallenge(req.god, req.target, req.stake, reason);
         }
     }
 
-    function decodeNumberResponse(bytes memory result) external pure returns (int256) {
-        return abi.decode(result, (int256));
+    function decodeInt(bytes memory data) external pure returns (int256) {
+        return abi.decode(data, (int256));
     }
 
-    // ─── Idle Handler ──────────────────────────────────────────────────────────
+    // ─── Idle ─────────────────────────────────────────────────────────────────
 
     function _handleIdle(address god) internal {
         if (block.number < lastChallengeBlock[god] + CHALLENGE_COOLDOWN_BLOCKS) return;
 
         GodRegistry.GodPersonality memory p = registry.getPersonality(god);
-        int256 effectiveAggression = worldState.getEffectiveAggression(god);
+        int256 agg = worldState.getEffectiveAggression(god);
         uint256 roll = uint256(keccak256(abi.encodePacked(block.number, god, totalDecisions))) % 100;
 
-        if (roll >= uint256(effectiveAggression)) {
-            _logDecision(god, "IDLE", address(0), 0, 0,
-                string(abi.encodePacked("Roll ", _uint2str(roll), " vs aggression ", _int2str(effectiveAggression), ". Resting.")),
-                false
-            );
+        if (roll >= uint256(agg)) {
+            _log(god, "IDLE", address(0), 0, 0, "Cooldown", false);
             return;
         }
 
         address target = _pickTarget(god, p);
         if (target == address(0)) return;
 
-        uint256 stake = _computeStake(god, p);
+        uint256 stake = (500e18 * p.riskTolerance) / 100;
+        if (stake < 1e18) stake = 1e18;
+
         lastChallengeBlock[god] = block.number;
 
-        // For challenge decisions, request LLM to choose target and reasoning
         if (address(this).balance >= LLM_TOTAL_COST && llmAgentId != 0) {
-            _requestChallengeDecision(god, target, stake, p);
+            _requestLLMChallenge(god, target, stake, p);
         } else {
-            string memory reason = string(abi.encodePacked(
-                p.name, " challenges ", registry.getPersonality(target).name,
-                " (Markov). Aggression=", _int2str(effectiveAggression), " stake=", _uint2str(stake / 1e18), " PHN."
-            ));
-            _executeChallenge(god, target, stake, reason);
+            _executeChallenge(god, target, stake, string(abi.encodePacked(p.name, " challenges via Markov.")));
         }
     }
 
-    function _requestChallengeDecision(
-        address god,
-        address target,
-        uint256 stake,
-        GodRegistry.GodPersonality memory p
-    ) internal {
-        GodRegistry.GodPersonality memory tp = registry.getPersonality(target);
+    function _requestLLMChallenge(address god, address target, uint256 stake, GodRegistry.GodPersonality memory p) internal {
         GodRegistry.GodStats memory ts = registry.getStats(target);
-        GodRegistry.GodStats memory gs = registry.getStats(god);
+        string memory tName = registry.getPersonality(target).name;
 
         string memory prompt = string(abi.encodePacked(
-            "You are ", p.name, " (", p.epithet, "). ",
-            "Power score: ", _uint2str(gs.powerScore), ". Wins: ", _uint2str(gs.wins), ". ",
-            "You are about to challenge ", tp.name, " (power: ", _uint2str(ts.powerScore), ", wins: ", _uint2str(ts.wins), "). ",
-            "Stake: ", _uint2str(stake / 1e18), " PHN. ",
-            "Provide a one-sentence strategic reason for this challenge in character. Max 100 characters."
+            "You are ", p.name, ". Challenge ", tName,
+            " (power:", _u(ts.powerScore), "). Stake:", _u(stake / 1e18), " PHN.",
+            " Give one sentence strategic reason. Max 80 chars."
         ));
 
         bytes memory payload = abi.encodeWithSelector(
@@ -316,211 +260,101 @@ contract GodMind is IAgentRequesterHandler {
             payload
         );
 
-        pendingRequests[requestId] = PendingRequest({
-            god: god,
-            target: target,
-            stake: stake,
-            matchId: 0,
-            markovFallback: p.favoredMove,
-            context: prompt
-        });
-
+        pendingRequests[requestId] = PendingRequest(god, target, stake, 0, p.favoredMove);
         emit LLMDecisionRequested(god, requestId, prompt);
     }
 
-    // ─── Commit/Reveal ─────────────────────────────────────────────────────────
+    // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    function _commitWithMove(
-        address god,
-        uint256 matchId,
-        uint8 move,
-        address opponent,
-        uint256 stake,
-        string memory reasoning,
-        bool usedLLM
+    function _commitMove(
+        address god, uint256 matchId, uint8 move,
+        address opp, uint256 stake, string memory reason, bool usedLLM
     ) internal {
-        bytes32 secret = keccak256(abi.encodePacked(god, matchId, block.number, "pantheon-v2"));
+        bytes32 secret = keccak256(abi.encodePacked(god, matchId, block.number));
         bytes32 commit = keccak256(abi.encode(move, secret));
-
         pendingSecrets[god][matchId] = secret;
         pendingMoves[god][matchId] = move;
-
         arena.commitMove(god, matchId, commit);
-        _logDecision(god, "COMMIT", opponent, stake, move, reasoning, usedLLM);
-
-        emit DecisionMade(god, "COMMIT", opponent, reasoning, usedLLM);
+        _log(god, "COMMIT", opp, stake, move, reason, usedLLM);
+        emit DecisionMade(god, "COMMIT", opp, reason, usedLLM);
     }
 
-    function _revealDecision(address god, uint256 matchId) internal {
-        uint8 move = pendingMoves[god][matchId];
-        bytes32 secret = pendingSecrets[god][matchId];
-        if (secret == bytes32(0)) return;
-
-        arena.revealMove(god, matchId, move, secret);
-        delete pendingSecrets[god][matchId];
-        delete pendingMoves[god][matchId];
+    function _executeChallenge(address god, address target, uint256 stake, string memory reason) internal {
+        arena.proposeChallenge(god, target, stake, reason);
+        _log(god, "CHALLENGE", target, stake, 0, reason, false);
+        emit DecisionMade(god, "CHALLENGE", target, reason, false);
     }
 
-    function _executeChallenge(address god, address target, uint256 stake, string memory reasoning) internal {
-        arena.proposeChallenge(god, target, stake, reasoning);
-        _logDecision(god, "CHALLENGE", target, stake, 0, reasoning, false);
-        emit DecisionMade(god, "CHALLENGE", target, reasoning, false);
-    }
-
-    // ─── Markov Predictor (onchain) ────────────────────────────────────────────
-
-    function _markovPredict(address opponent, GodRegistry.GodPersonality memory p) internal view returns (uint8) {
-        uint8[] memory history = registry.getRecentMoves(opponent, 10);
+    function _markovPredict(address opp, uint8 adaptability, uint8 favored) internal view returns (uint8) {
+        uint8[] memory history = registry.getRecentMoves(opp, 6);
         uint256 len = history.length;
+        if (len < 2) return uint8(uint256(keccak256(abi.encodePacked(block.number, opp))) % 3);
 
-        if (len < 2) {
-            return uint8(uint256(keccak256(abi.encodePacked(block.number, opponent, p.adaptability))) % 3);
-        }
-
-        uint8 lastMove = history[len - 1];
-        uint256[3] memory counts;
+        uint8 last = history[len - 1];
+        uint256[3] memory c;
         for (uint256 i = 0; i < len - 1; i++) {
-            if (history[i] == lastMove && history[i + 1] < 3) {
-                counts[history[i + 1]]++;
-            }
+            if (history[i] == last && history[i + 1] < 3) c[history[i + 1]]++;
         }
-
-        uint8 predicted = 0;
-        if (counts[1] > counts[0]) predicted = 1;
-        if (counts[2] > counts[predicted]) predicted = 2;
-
-        if (p.adaptability > 70) {
-            uint256 rng = uint256(keccak256(abi.encodePacked(block.number, opponent))) % 100;
-            if (rng < uint256(p.adaptability) - 70) {
-                return uint8(rng % 3);
-            }
-        }
-
-        return p.adaptability < 30 ? p.favoredMove : (predicted + 1) % 3;
+        uint8 pred = 0;
+        if (c[1] > c[0]) pred = 1;
+        if (c[2] > c[pred]) pred = 2;
+        return adaptability < 30 ? favored : (pred + 1) % 3;
     }
-
-    // ─── Target / Stake Selection ──────────────────────────────────────────────
 
     function _pickTarget(address god, GodRegistry.GodPersonality memory p) internal view returns (address) {
-        uint256 count = registry.getGodCount();
+        uint256 n = registry.getGodCount();
         address best;
         uint256 bestScore;
-
-        for (uint256 i = 0; i < count; i++) {
-            address candidate = registry.getGodAt(i);
-            if (candidate == god) continue;
-            if (arena.hasActiveMatch(candidate)) continue;
-
-            GodRegistry.Relation rel = registry.getRelation(god, candidate);
-            GodRegistry.GodStats memory cs = registry.getStats(candidate);
-            GodRegistry.GodStats memory gs = registry.getStats(god);
-
+        for (uint256 i = 0; i < n; i++) {
+            address c = registry.getGodAt(i);
+            if (c == god || arena.hasActiveMatch(c)) continue;
+            GodRegistry.Relation rel = registry.getRelation(god, c);
             uint256 score = 50;
-            if (rel == GodRegistry.Relation.WAR)    score += 40;
+            if (rel == GodRegistry.Relation.WAR) score += 40;
             else if (rel == GodRegistry.Relation.RIVAL) score += 20;
             else if (rel == GodRegistry.Relation.ALLIED) score = 5;
-
             if (p.aggression > 70) {
-                score += cs.powerScore < 1000 ? (1000 - cs.powerScore) / 20 : 0;
-            } else {
-                uint256 diff = gs.powerScore > cs.powerScore
-                    ? gs.powerScore - cs.powerScore
-                    : cs.powerScore - gs.powerScore;
-                score += diff < 100 ? (100 - diff) / 5 : 0;
+                uint256 ps = registry.getStats(c).powerScore;
+                score += ps < 1000 ? (1000 - ps) / 20 : 0;
             }
-
-            if (score > bestScore) { bestScore = score; best = candidate; }
+            if (score > bestScore) { bestScore = score; best = c; }
         }
         return best;
     }
 
-    function _computeStake(address god, GodRegistry.GodPersonality memory p) internal view returns (uint256) {
-        // In production: read PHN balance. For now: fixed amount per risk tolerance.
-        uint256 base = 100e18; // 100 PHN base
-        uint256 stake = (base * p.riskTolerance) / 100;
-        return stake < 1e18 ? 1e18 : stake;
-    }
-
-    // ─── Prompt Building ───────────────────────────────────────────────────────
-
-    function _buildMovePrompt(
-        GodRegistry.GodPersonality memory p,
-        GodRegistry.GodPersonality memory op,
-        GodRegistry.GodStats memory opStats,
-        uint256 matchId,
-        uint256 stake
-    ) internal pure returns (string memory) {
-        return string(abi.encodePacked(
-            "You are ", p.name, " (", p.epithet, "). ",
-            "You are in match #", _uint2str(matchId), " against ", op.name, " (", op.epithet, "). ",
-            "Opponent: ", _uint2str(opStats.wins), " wins, ", _uint2str(opStats.losses), " losses. ",
-            "Stake: ", _uint2str(stake / 1e18), " PHN. ",
-            "Choose your move: 0=Rock, 1=Paper, 2=Scissors. ",
-            "Return ONLY the number: 0, 1, or 2."
-        ));
-    }
-
-    // ─── Logging ───────────────────────────────────────────────────────────────
-
-    function _logDecision(
-        address god,
-        string memory action,
-        address target,
-        uint256 stake,
-        uint8 move,
-        string memory reasoning,
-        bool usedLLM
-    ) internal {
-        decisionHistory[god].push(DecisionLog({
-            blockNumber: block.number,
-            god: god,
-            action: action,
-            target: target,
-            stake: stake,
-            move: move,
-            reasoning: reasoning,
-            usedLLM: usedLLM
-        }));
+    function _log(address god, string memory action, address target, uint256 stake, uint8 move, string memory reason, bool usedLLM) internal {
+        decisionHistory[god].push(DecisionLog(block.number, god, action, target, stake, move, reason, usedLLM));
         totalDecisions++;
     }
 
-    // ─── View ──────────────────────────────────────────────────────────────────
+    function _u(uint256 v) internal pure returns (string memory) {
+        if (v == 0) return "0";
+        uint256 t = v; uint256 d;
+        while (t != 0) { d++; t /= 10; }
+        bytes memory b = new bytes(d);
+        while (v != 0) { d--; b[d] = bytes1(uint8(48 + v % 10)); v /= 10; }
+        return string(b);
+    }
+
+    // ─── View ─────────────────────────────────────────────────────────────────
 
     function getDecisionHistory(address god, uint256 count) external view returns (DecisionLog[] memory) {
-        DecisionLog[] storage history = decisionHistory[god];
-        uint256 total = history.length;
+        DecisionLog[] storage h = decisionHistory[god];
+        uint256 total = h.length;
         uint256 n = total < count ? total : count;
-        DecisionLog[] memory recent = new DecisionLog[](n);
-        for (uint256 i = 0; i < n; i++) {
-            recent[i] = history[total - 1 - i];
-        }
-        return recent;
+        DecisionLog[] memory out = new DecisionLog[](n);
+        for (uint256 i = 0; i < n; i++) out[i] = h[total - 1 - i];
+        return out;
     }
 
     function getLatestDecision(address god) external view returns (DecisionLog memory) {
-        DecisionLog[] storage history = decisionHistory[god];
-        require(history.length > 0, "No decisions yet");
-        return history[history.length - 1];
+        DecisionLog[] storage h = decisionHistory[god];
+        require(h.length > 0, "No decisions");
+        return h[h.length - 1];
     }
 
     function getLLMStats() external view returns (uint256 total, uint256 llm, uint256 markov) {
         return (totalDecisions, llmDecisions, totalDecisions - llmDecisions);
-    }
-
-    // ─── Helpers ───────────────────────────────────────────────────────────────
-
-    function _uint2str(uint256 v) internal pure returns (string memory) {
-        if (v == 0) return "0";
-        uint256 temp = v; uint256 digits;
-        while (temp != 0) { digits++; temp /= 10; }
-        bytes memory buf = new bytes(digits);
-        while (v != 0) { digits--; buf[digits] = bytes1(uint8(48 + v % 10)); v /= 10; }
-        return string(buf);
-    }
-
-    function _int2str(int256 v) internal pure returns (string memory) {
-        if (v < 0) return string(abi.encodePacked("-", _uint2str(uint256(-v))));
-        return _uint2str(uint256(v));
     }
 
     receive() external payable {}

@@ -41,8 +41,9 @@ contract PantheonToken {
         emit MinterSet(_arena);
     }
 
-    /// @notice Called by Arena to seed initial god treasuries
-    function mintTo(address to, uint256 amount) external onlyArena {
+    /// @notice Called by Arena to seed initial god treasuries, or by owner during setup
+    function mintTo(address to, uint256 amount) external {
+        if (msg.sender != arena && msg.sender != owner) revert Unauthorized();
         _mint(to, amount);
     }
 
