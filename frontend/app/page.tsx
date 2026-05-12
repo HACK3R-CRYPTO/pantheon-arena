@@ -240,7 +240,7 @@ function WarNarrative({ gods, feed, battles }: { gods: God[]; feed: Battle[]; ba
         display:"flex", gap:40, alignItems:"center",
         overflowX:"auto",
       }}>
-        <span style={{ fontSize:9, fontWeight:800, letterSpacing:"0.18em", color:"rgba(168,85,247,0.7)", shrink:0, flexShrink:0 }}>
+        <span style={{ fontSize:9, fontWeight:800, letterSpacing:"0.18em", color:"rgba(168,85,247,0.7)", flexShrink:0 }}>
           WAR REPORT
         </span>
         {lines.map((line, i) => (

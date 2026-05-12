@@ -44,6 +44,65 @@ const walletClient = createWalletClient({
   transport: http(process.env.SOMNIA_RPC || "https://dream-rpc.somnia.network"),
 });
 
+// ── NarratorAgent — Somnia LLM Inference with Markov fallback ────────────────
+// Platform: 0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
+// Agent:    12847293847561029384 (Qwen3-30B LLM Inference)
+const NARRATOR_ADDRESS = (process.env.NARRATOR_ADDRESS || "0x196f70a4ca74cd744613f177cac5240415893aab") as `0x${string}`;
+const NarratorABI = parseAbi([
+  "function requestNarrative(address god, string godName, string opponentName, string godLore) external returns (uint256)",
+  "function getNarrative(address god) external view returns (string)",
+  "event NarrativeGenerated(uint256 indexed requestId, address indexed god, string narrative)",
+]);
+
+// Cache — populated when Somnia validators respond to LLM requests
+const narrativeCache: Record<string, string> = {};
+
+async function fetchNarrative(godAddr: string, godName: string): Promise<string> {
+  try {
+    const n = await publicClient.readContract({
+      address: NARRATOR_ADDRESS, abi: NarratorABI,
+      functionName: "getNarrative", args: [godAddr as `0x${string}`],
+    }) as string;
+    if (n && n !== "The god prepares to strike.") {
+      narrativeCache[godAddr.toLowerCase()] = n;
+      return n;
+    }
+  } catch {}
+  // Markov fallback — runs immediately if LLM unavailable
+  return narrativeCache[godAddr.toLowerCase()] || generateReason(godName, "opponent", 70);
+}
+
+async function triggerLLMNarrative(godAddr: string, godName: string, targetName: string, godLore: string) {
+  try {
+    await walletClient.writeContract({
+      address: NARRATOR_ADDRESS, abi: NarratorABI,
+      functionName: "requestNarrative",
+      args: [godAddr as `0x${string}`, godName, targetName, godLore],
+      account, gas: BigInt(5_000_000),
+    });
+    console.log(chalk.cyan(`[Somnia LLM] Narrative requested for ${godName} → ${targetName}`));
+  } catch (e: any) {
+    // Silent — Markov fallback kicks in automatically
+  }
+}
+
+function watchNarrativeEvents() {
+  publicClient.watchContractEvent({
+    address: NARRATOR_ADDRESS, abi: NarratorABI,
+    eventName: "NarrativeGenerated",
+    onLogs: (logs) => {
+      for (const log of logs) {
+        const { god, narrative } = log.args as any;
+        if (god && narrative) {
+          narrativeCache[(god as string).toLowerCase()] = narrative;
+          const g = GODS.find(x => x.address.toLowerCase() === (god as string).toLowerCase());
+          console.log(chalk.magenta(`\n🤖 [SOMNIA LLM Qwen3] ${g?.name ?? god}: "${narrative}"\n`));
+        }
+      }
+    },
+  });
+}
+
 // ── Contracts ─────────────────────────────────────────────────────────────────
 
 const CONTRACTS = {
@@ -225,7 +284,14 @@ async function proposeGodChallenges() {
 
       const stake = BigInt(Math.floor(500 * p.riskTolerance / 100)) * BigInt(1e18);
       const targetGod = GODS.find(g => g.address.toLowerCase() === target!.toLowerCase());
-      const reason = generateReason(p.name, targetGod?.name || "unknown", p.aggression);
+
+      // Get LLM-generated narrative (falls back to Markov if unavailable)
+      const reason = await fetchNarrative(god.address, p.name);
+
+      // Trigger next LLM generation asynchronously (result used for NEXT challenge)
+      triggerLLMNarrative(god.address, p.name, targetGod?.name || "unknown",
+        `You are ${p.name}, ${p.name === "ARES" ? "God of War" : p.name === "ATHENA" ? "Goddess of Wisdom" : p.name === "HERMES" ? "God of Trade" : "The Primordial Void"}. Be ruthless and in-character.`)
+        .catch(() => {});
 
       console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.yellow(` challenging ${targetGod?.name}…`));
 
@@ -440,8 +506,9 @@ async function start() {
 
   console.log(chalk.gray(`\nStarting decision loop (${INTERVAL_MS / 1000}s interval)...\n`));
 
-  // Watch events
+  // Watch events + LLM narrative callbacks
   watchEvents();
+  watchNarrativeEvents();
 
   // Run immediately then on interval
   await runDecisionRound();
