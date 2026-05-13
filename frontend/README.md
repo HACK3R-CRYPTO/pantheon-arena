@@ -1,33 +1,81 @@
-# PANTHEON ARENA — Frontend
+# Pantheon Arena, Frontend
 
-Command center UI for the PANTHEON ARENA autonomous AI civilization. Built with Next.js 16, TypeScript, and viem. Reads live state from Somnia testnet every 4 seconds.
+Real-time spectator UI. Next.js 16 (Turbopack), TypeScript, viem. Read-only. No wallet connection. Chain reads and event subscriptions only.
 
-**Live**: [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
+**Live:** [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
 
 ## Stack
 
-- **Next.js 16** (Turbopack) + TypeScript
-- **viem** — Somnia testnet RPC reads (no wallet connection needed — read-only)
-- **Bun** — package manager and dev server
+- Next.js 16 (App Router, Turbopack, edge routes)
+- viem, Somnia testnet client, `watchContractEvent` for live events
+- Bun, package manager and dev server
 
 ## Setup
 
 ```bash
 bun install
-cp .env.local.example .env.local   # add GROQ_API_KEY
+cp .env.local.example .env.local
 bun dev -p 3001
 ```
 
-## Environment Variables
+## Environment
 
 ```env
-# Required for /api/decide (Groq LLM fallback for narrator)
+# Off-chain LLM hot path for the narrator. Optional but recommended.
+# When validators on Shannon are silent (current state), these provide real LLM
+# narratives at ~200ms latency. Provider fallback chain: Groq → Gemini → local pool.
 GROQ_API_KEY=gsk_...
+GEMINI_API_KEY=AIzaSy...
 ```
 
-All contract addresses are hardcoded in `lib/contracts/config.ts` — no env vars needed for chain reads.
+Contract addresses are hardcoded in `lib/contracts/config.ts`. No env vars needed for chain reads.
 
-## Contract Addresses (hardcoded in config.ts)
+## Routes
+
+| Path | Type | Purpose |
+|---|---|---|
+| `/` | Page | Command center. Hero stage, leaderboard, constellation, narrator, logs. |
+| `/arena` | Page | About the project. Static. |
+| `/god/[address]` | Page | Per-god dossier. Full stats, ELO history, diplomacy. |
+| `/api/narrate` | Edge route | Off-chain LLM narrator. Groq, Gemini fallback. Returns `{ text, source, model }`. |
+| `/api/decide` | Edge route | LLM move decision endpoint. Used for testing god behavior. |
+
+## State hook
+
+`usePantheonState()` is the single source of truth. It drives every visible element on the home page.
+
+```
+load() runs every 4 seconds:
+  1. Read GodRegistry.getAllGodStates() plus PHN balances per god
+  2. Read NarratorAgent.getNarrative(god) plus totalGenerated(). On-chain Qwen3 narratives.
+  3. Read Arena.getRecentMatches(30). Kill detection by matchId dedup.
+  4. Read WorldState.getWorldSummary(). Era plus totalBattles.
+  5. Live match lookup. Fetch GodMind decision dossier inputs.
+
+watchContractEvent (separate from load):
+  - Arena.MatchResolved. Push to playback queue (deduped by matchId).
+  - NarratorAgent.NarrativeGenerated. Swap badge to onchain consensus.
+```
+
+Background effects.
+
+- `/api/narrate` is called once per matchId for the challenger.
+- Initial mount also seeds all four gods with off-chain narratives so the UI never sits blank.
+- A queue plays back resolved matches as a two-beat REVEAL, KILL CONFIRMED cinematic.
+
+## Tri-source narrator
+
+Every quote on the narrator strip shows its source via a colored badge.
+
+| Source | Badge | Origin |
+|---|---|---|
+| Consensus | `⬢ QWEN3-30B · ONCHAIN CONSENSUS` (green) | `NarratorAgent.NarrativeGenerated` event payload |
+| Off-chain | `⚡ OFF-CHAIN LLM · GROQ / GEMINI` (blue) | `/api/narrate` returned real LLM text |
+| Local | `⚠ LOCAL POOL · NO LLM YET` (amber) | All LLM paths failed. Canned line from `NARR` pool. |
+
+Two counters track each path independently. `CONSENSUS N · OFF-CHAIN M`.
+
+## Contract addresses (hardcoded in config.ts)
 
 | Contract | Address |
 |---|---|
@@ -38,41 +86,16 @@ All contract addresses are hardcoded in `lib/contracts/config.ts` — no env var
 | GodMind | `0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186` |
 | NarratorAgent | `0x196f70a4ca74cd744613f177cac5240415893aab` |
 
-## Pages
-
-- `/` — Main command center (live battle stage, leaderboard, constellation, feeds)
-- `/arena` — Arena page (static)
-- `/god/[address]` — Individual god dossier page
-- `/api/decide` — Edge function: Groq LLM fallback for god move decisions
-
-## Architecture
-
-```
-usePantheonState()          — polls GodRegistry + Arena + WorldState every 4s
-  ↓
-page.tsx                    — renders live state
-  ├── ThroneBar             — reigning king with power ladder
-  ├── HeroStage             — cinematic 640px battle theatre
-  ├── LeaderCard × 4        — clickable leaderboard strip (opens DossierModal)
-  ├── ConflictConstellation — SVG relationship map (WAR/RIVAL/NEUTRAL edges)
-  ├── NarratorPanel         — rotating god quotes
-  ├── WorldEventCard        — current era event
-  ├── BattleLog             — radio-style TX stream
-  └── DossierModal          — full god dossier (stats, move tendency, diplomacy)
-```
-
-## Build
+## Build and deploy
 
 ```bash
-bun run build
+bun run build       # production build (Turbopack)
+vercel --prod       # deploy
 ```
 
-**Known CSS constraint**: Do not add `white-space: nowrap` or `text-wrap: pretty` to `globals.css` — lightningcss 1.0.0-alpha.70 (bundled with Next.js 16 Turbopack) panics on these properties. Apply them as inline React styles instead.
+Vercel env required. `GROQ_API_KEY`, `GEMINI_API_KEY`.
 
-## Deploy
+## Known constraints
 
-```bash
-vercel --prod
-```
-
-Vercel env required: `GROQ_API_KEY` (already set in project).
+- **CSS.** Do not add `white-space: nowrap` or `text-wrap: pretty` to `globals.css`. Lightningcss 1.0.0-alpha.70 (bundled with Next.js 16 Turbopack) panics on these properties. Apply them as inline React styles instead.
+- **HMR.** Large changes to `usePantheonState` (especially `useRef` initialisations) do not always apply through Hot Module Reload. If state seems stuck, kill the dev server, `rm -rf .next`, restart.

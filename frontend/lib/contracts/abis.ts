@@ -307,3 +307,60 @@ export const PantheonTokenABI = [
     outputs: [{ name: "", type: "uint256" }],
   },
 ] as const;
+
+// Somnia LLM Inference Agent (Qwen3-30B) — consensus-validated narratives written onchain
+export const NarratorAgentABI = [
+  {
+    name: "getNarrative",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "god", type: "address" }],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    name: "latestNarrative",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    name: "totalGenerated",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "LLM_AGENT_ID",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "PLATFORM",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "NarrativeGenerated",
+    type: "event",
+    inputs: [
+      { name: "requestId", type: "uint256", indexed: true },
+      { name: "god", type: "address", indexed: true },
+      { name: "narrative", type: "string", indexed: false },
+    ],
+  },
+  {
+    name: "NarrativeRequested",
+    type: "event",
+    inputs: [
+      { name: "requestId", type: "uint256", indexed: true },
+      { name: "god", type: "address", indexed: true },
+      { name: "prompt", type: "string", indexed: false },
+    ],
+  },
+] as const;

@@ -103,13 +103,24 @@ function watchNarrativeEvents() {
   });
 }
 
+// Wraps any promise with a timeout. Used around RPC calls (writeContract,
+// waitForTransactionReceipt) so a stuck Somnia validator can't freeze the
+// scheduler indefinitely. Returns null on timeout.
+async function withTimeout<T>(p: Promise<T>, ms: number, label = "op"): Promise<T | null> {
+  let timer: any;
+  const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => { console.log(chalk.gray(`[timeout] ${label} > ${ms}ms`)); resolve(null); }, ms); });
+  try { return await Promise.race([p, timeout]); }
+  finally { clearTimeout(timer); }
+}
+
 // ── Contracts ─────────────────────────────────────────────────────────────────
 
 const CONTRACTS = {
-  GodMind:     (process.env.GOD_MIND_ADDRESS     || "") as `0x${string}`,
-  GodRegistry: (process.env.GOD_REGISTRY_ADDRESS || "") as `0x${string}`,
-  Arena:       (process.env.ARENA_ADDRESS        || "") as `0x${string}`,
-  WorldState:  (process.env.WORLD_STATE_ADDRESS  || "") as `0x${string}`,
+  GodMind:       (process.env.GOD_MIND_ADDRESS       || "") as `0x${string}`,
+  GodRegistry:   (process.env.GOD_REGISTRY_ADDRESS   || "") as `0x${string}`,
+  Arena:         (process.env.ARENA_ADDRESS          || "") as `0x${string}`,
+  WorldState:    (process.env.WORLD_STATE_ADDRESS    || "") as `0x${string}`,
+  PantheonToken: (process.env.PANTHEON_TOKEN_ADDRESS || "") as `0x${string}`,
 };
 
 // God addresses (identities — no private keys needed)
@@ -138,8 +149,17 @@ const ArenaABI = parseAbi([
   "function proposeChallenge(address challenger, address opponent, uint256 stake, string calldata decisionReason) external returns (uint256 matchId)",
   "function hasActiveMatch(address) external view returns (bool)",
   "function activeMatchOf(address) external view returns (uint256)",
+  "function forfeitExpired(uint256 matchId) external",
+  "function COMMIT_DEADLINE_BLOCKS() external view returns (uint256)",
+  "function REVEAL_DEADLINE_BLOCKS() external view returns (uint256)",
   "event MatchResolved(uint256 indexed matchId, address indexed winner, address indexed loser, uint256 stake, uint8 winnerMove, uint8 loserMove, string decisionReason)",
   "event MatchProposed(uint256 indexed matchId, address indexed challenger, address indexed opponent, uint256 stake)",
+  "event MatchCancelled(uint256 indexed matchId, string reason)",
+]);
+
+const PantheonTokenABI = parseAbi([
+  "function balanceOf(address) external view returns (uint256)",
+  "function mintTo(address to, uint256 amount) external",
 ]);
 
 const WorldStateABI = parseAbi([
@@ -193,26 +213,128 @@ function generateReason(attacker: string, _target: string, _aggression: number):
 // ── Global match state — enforces single-match-at-a-time ─────────────────────
 
 // MatchStatus: 0=PENDING, 1=ACCEPTED, 2=COMMITTED, 3=RESOLVED, 4=CANCELLED
-async function getActiveMatch(): Promise<{ matchId: bigint; status: number; challenger: string; opponent: string } | null> {
+// Uses hasActiveMatch(god) + activeMatchOf(god) — direct O(1) contract lookups,
+// always accurate even milliseconds after a propose/accept tx confirms.
+async function getActiveMatch(): Promise<{ matchId: bigint; status: number; challenger: string; opponent: string; stake: bigint; createdBlock: bigint } | null> {
   try {
-    const count = await publicClient.readContract({
-      address: CONTRACTS.Arena, abi: ArenaABI, functionName: "matchCounter",
-    }) as bigint;
-    if (count === 0n) return null;
+    for (const god of GODS) {
+      const inMatch = await publicClient.readContract({
+        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "hasActiveMatch", args: [god.address],
+      }).catch(() => false) as boolean;
+      if (!inMatch) continue;
 
-    // Scan recent matches newest-first for any unresolved
-    const lookback = Math.min(Number(count), 20);
-    for (let i = Number(count); i > Number(count) - lookback; i--) {
+      const matchId = await publicClient.readContract({
+        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "activeMatchOf", args: [god.address],
+      }).catch(() => 0n) as bigint;
+      if (!matchId || matchId === 0n) continue;
+
       const raw = await publicClient.readContract({
-        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "getMatch", args: [BigInt(i)],
-      }) as unknown as any[];
+        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "getMatch", args: [matchId],
+      }).catch(() => null) as unknown as any[] | null;
+      if (!raw) continue;
+
       const status = Number(raw[5]);
-      if (status < 3) { // PENDING=0, ACCEPTED=1, COMMITTED=2 — all live
-        return { matchId: BigInt(i), status, challenger: raw[1] as string, opponent: raw[2] as string };
+      if (status < 3) {
+        return {
+          matchId, status,
+          challenger: raw[1] as string,
+          opponent: raw[2] as string,
+          stake: raw[3] as bigint,
+          createdBlock: raw[13] as bigint,
+        };
       }
     }
     return null;
   } catch { return null; }
+}
+
+// Reads the defender's PHN balance — used to skip accepts that will revert with
+// InsufficientBalance, and to clamp future challenge stakes.
+async function getPhnBalance(addr: `0x${string}`): Promise<bigint> {
+  try {
+    return await publicClient.readContract({
+      address: CONTRACTS.PantheonToken, abi: PantheonTokenABI, functionName: "balanceOf", args: [addr],
+    }) as bigint;
+  } catch { return 0n; }
+}
+
+// Keeps every god solvent enough to participate. Losses burn PHN out of the loser's
+// balance, so an unlucky god can spiral to 0 and get locked out of the arena entirely.
+// We top them back up to TOPUP_TARGET whenever they fall below TOPUP_FLOOR — the
+// scheduler wallet is the token owner, so mintTo is permissioned to us.
+const TOPUP_FLOOR  = BigInt(200) * BigInt(1e18);
+const TOPUP_TARGET = BigInt(1000) * BigInt(1e18);
+async function topUpBankruptGods() {
+  for (const god of GODS) {
+    try {
+      const bal = await getPhnBalance(god.address as `0x${string}`);
+      if (bal >= TOPUP_FLOOR) continue;
+      const needed = TOPUP_TARGET - bal;
+      const hash = await walletClient.writeContract({
+        address: CONTRACTS.PantheonToken, abi: PantheonTokenABI, functionName: "mintTo",
+        args: [god.address as `0x${string}`, needed], account, gas: BigInt(500_000),
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash }).catch(() => null);
+      if (receipt && receipt.status === "success") {
+        console.log(chalk.cyan(`[topup] ${god.name} was at ${(Number(bal)/1e18).toFixed(0)} PHN — minted ${(Number(needed)/1e18).toFixed(0)} → ${hash.slice(0,14)}…`));
+      }
+    } catch (e: any) {
+      console.log(chalk.gray(`[topup] ${god.name} failed: ${(e?.shortMessage || e?.message || "").slice(0,80)}`));
+    }
+  }
+}
+
+// Anyone can call forfeitExpired after deadline. We use it ONLY for matches that
+// we've proven cannot proceed — e.g. a PROPOSE-phase match whose defender lacks
+// the PHN to accept, or any match wildly past the contract's deadline (chain
+// rate on Somnia is ~15 blocks/sec, so 50 blocks ≈ 3 seconds — that's far below
+// our 15s tick. We use a much wider threshold to avoid killing healthy matches).
+const FORFEIT_PROPOSE_BLOCKS  = 600n;  // ~40 seconds of PROPOSE without accept = genuinely stuck
+const FORFEIT_INFLIGHT_BLOCKS = 2000n; // ~2 minutes of ACCEPTED/COMMITTED without resolve = stuck
+async function forfeitIfStuck(active: { matchId: bigint; status: number; createdBlock: bigint; opponent: string; stake: bigint }) {
+  try {
+    const current = await publicClient.getBlockNumber();
+    const elapsed = current - active.createdBlock;
+
+    let shouldForfeit = false;
+    let reason = "";
+
+    if (active.status === 0) {
+      // PROPOSE — only forfeit if we KNOW accept will fail (opponent broke), or wildly stale.
+      const oppBalance = await getPhnBalance(active.opponent as `0x${string}`);
+      if (oppBalance < active.stake && elapsed > 50n) {
+        shouldForfeit = true;
+        reason = `defender balance ${(Number(oppBalance)/1e18).toFixed(0)} < stake ${(Number(active.stake)/1e18).toFixed(0)} PHN`;
+      } else if (elapsed > FORFEIT_PROPOSE_BLOCKS) {
+        shouldForfeit = true;
+        reason = `${elapsed} blocks in PROPOSE — defender never accepted`;
+      }
+    } else if (active.status === 1 || active.status === 2) {
+      // ACCEPTED or COMMITTED — give the executeDecision loop plenty of time before declaring dead.
+      if (elapsed > FORFEIT_INFLIGHT_BLOCKS) {
+        shouldForfeit = true;
+        reason = `${elapsed} blocks in-flight without resolve — commit/reveal stuck`;
+      }
+    }
+
+    if (!shouldForfeit) return false;
+
+    console.log(chalk.red(`[forfeit] match #${active.matchId}: ${reason} — calling forfeitExpired…`));
+    const hash = await walletClient.writeContract({
+      address: CONTRACTS.Arena, abi: ArenaABI, functionName: "forfeitExpired",
+      args: [active.matchId], account, gas: BigInt(1_500_000),
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash }).catch(() => null);
+    if (receipt && receipt.status === "success") {
+      console.log(chalk.green(`[forfeit] match #${active.matchId} cleared → ${hash.slice(0, 14)}…`));
+      return true;
+    }
+    console.log(chalk.yellow(`[forfeit] tx submitted but did not confirm cleanly: ${hash.slice(0,14)}…`));
+    return false;
+  } catch (e: any) {
+    console.log(chalk.gray(`[forfeit] ${(e?.shortMessage || e?.message || "").slice(0, 100)}`));
+    return false;
+  }
 }
 
 // ── Match Acceptance ──────────────────────────────────────────────────────────
@@ -226,16 +348,31 @@ async function processPendingMatches() {
     const god = GODS.find(g => g.address.toLowerCase() === opponent.toLowerCase());
     if (!god) return;
 
+    // Skip accepts that would revert with InsufficientBalance. Without this guard
+    // the scheduler used to spam acceptChallenge every tick on a stuck match
+    // (e.g. defender too poor to cover the stake) and silently swallow the revert.
+    const oppBalance = await getPhnBalance(opponent);
+    if (oppBalance < active.stake) {
+      console.log(chalk.red(`[accept] ${god.name} cannot afford match #${active.matchId}: balance ${(Number(oppBalance)/1e18).toFixed(0)} PHN < stake ${(Number(active.stake)/1e18).toFixed(0)} PHN — will forfeit after deadline`));
+      // Let forfeitIfStuck (called from the tick loop) clean this up once the deadline passes.
+      return;
+    }
+
     console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.yellow(` accepting challenge #${active.matchId}…`));
     try {
       const hash = await walletClient.writeContract({
         address: CONTRACTS.Arena, abi: ArenaABI, functionName: "acceptChallenge",
         args: [opponent, active.matchId], account, gas: BigInt(10_000_000),
       });
-      console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.green(` accepted → ${hash.slice(0, 14)}…`));
-      await sleep(3000);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash }).catch(() => null);
+      // Receipt could be `reverted` — only log success if the tx actually succeeded on chain.
+      if (receipt && receipt.status === "success") {
+        console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.green(` accepted → ${hash.slice(0, 14)}…`));
+      } else {
+        console.log(chalk.red(`[accept] ${god.name} acceptChallenge reverted (${hash.slice(0,14)}…) — match #${active.matchId} will forfeit after deadline`));
+      }
     } catch (e: any) {
-      console.log(chalk.gray(`[accept] ${(e?.shortMessage || e?.message || "").slice(0, 80)}`));
+      console.log(chalk.gray(`[accept] ${(e?.shortMessage || e?.message || "").slice(0, 100)}`));
     }
   } catch {}
 }
@@ -285,26 +422,72 @@ async function proposeGodChallenges() {
       if (candidates.length === 0) continue;
       const targetGod = candidates[Math.floor(Math.random() * candidates.length)]!;
 
-      const stake = BigInt(Math.floor(500 * p.riskTolerance / 100)) * BigInt(1e18);
+      // Risk-based desired stake clamped to the MIN of challenger + opponent balance.
+      // Prevents proposing fights neither side can pay (which would lock the arena
+      // until forfeitExpired). 10 PHN minimum so battles still matter.
+      const desiredStake = BigInt(Math.floor(500 * p.riskTolerance / 100)) * BigInt(1e18);
+      const [chalBal, oppBal] = await Promise.all([
+        getPhnBalance(god.address as `0x${string}`),
+        getPhnBalance(targetGod.address as `0x${string}`),
+      ]);
+      const minBalance = chalBal < oppBal ? chalBal : oppBal;
+      const MIN_STAKE = BigInt(10) * BigInt(1e18);
+      if (minBalance < MIN_STAKE) {
+        console.log(chalk.gray(`[propose] ${p.name} vs ${targetGod.name} skipped — one side below MIN_STAKE (${(Number(minBalance)/1e18).toFixed(0)} PHN)`));
+        continue;
+      }
+      const stake = desiredStake < minBalance ? desiredStake : minBalance;
       const reason = await fetchNarrative(god.address, p.name);
 
-      // Fire next LLM narrative request async (used for the NEXT challenge)
+      console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.yellow(` challenging ${targetGod.name}…`));
+
+      // Wrap RPC writes in a timeout — Somnia validators occasionally stall and
+      // a missing timeout would freeze the entire scheduler indefinitely.
+      const hash = await withTimeout(
+        walletClient.writeContract({
+          address: CONTRACTS.Arena, abi: ArenaABI, functionName: "proposeChallenge",
+          args: [god.address, targetGod.address, stake, reason],
+          account, gas: BigInt(30_000_000),
+        }),
+        12_000, `propose(${p.name}→${targetGod.name})`
+      );
+      if (!hash) return;
+
+      // Fire next LLM narrative request AFTER propose tx is sent — these two
+      // writeContract calls share a wallet/nonce, so running them concurrently
+      // can deadlock the scheduler. Sequencing keeps ticks moving.
       const lore = `You are ${p.name}, ${
         p.name === "ARES" ? "God of War" : p.name === "ATHENA" ? "Goddess of Wisdom" :
         p.name === "HERMES" ? "God of Trade" : "The Primordial Void"
       }. Be ruthless and in-character.`;
       triggerLLMNarrative(god.address, p.name, targetGod.name, lore).catch(() => {});
 
-      console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.yellow(` challenging ${targetGod.name}…`));
-
-      const hash = await walletClient.writeContract({
-        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "proposeChallenge",
-        args: [god.address, targetGod.address, stake, reason],
-        account, gas: BigInt(30_000_000),
-      });
+      // Wait for the tx to confirm on-chain so getActiveMatch() sees it immediately.
+      const receipt = await withTimeout(
+        publicClient.waitForTransactionReceipt({ hash }),
+        10_000, `receipt(${hash.slice(0,10)}…)`
+      );
+      if (!receipt) {
+        console.log(chalk.yellow(`[challenge] ${p.name} vs ${targetGod.name} — receipt timeout (${hash.slice(0,14)}…)`));
+        return;
+      }
+      if (receipt.status !== "success") {
+        // Reverted on chain. Try to decode the actual reason by simulating the call.
+        let revertReason = "unknown revert";
+        try {
+          await publicClient.simulateContract({
+            address: CONTRACTS.Arena, abi: ArenaABI, functionName: "proposeChallenge",
+            args: [god.address, targetGod.address, stake, reason], account,
+          });
+        } catch (simErr: any) {
+          revertReason = (simErr?.shortMessage || simErr?.message || "unknown").slice(0, 120);
+        }
+        console.log(chalk.red(`[challenge] ${p.name} vs ${targetGod.name} REVERTED — ${revertReason} (${hash.slice(0,14)}…)`));
+        return;
+      }
 
       lastChallengeTime[god.address] = Date.now();
-      console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.green(` challenged → ${hash.slice(0, 14)}…`));
+      console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.green(` challenged ${targetGod.name} for ${(Number(stake)/1e18).toFixed(0)} PHN → ${hash.slice(0, 14)}…`));
 
       // ONE challenge per tick — stop after the first successful proposal
       return;
@@ -319,7 +502,10 @@ async function proposeGodChallenges() {
 
 // ── Decision Loop ─────────────────────────────────────────────────────────────
 
-const INTERVAL_MS = 15_000; // 15s between decision rounds
+// 5s tick = ~15s per full match cycle (propose → accept → commit/reveal → resolve).
+// Originally 15s, which made each match cycle ~60s and felt sluggish for spectators.
+// Somnia's sub-second blocks easily handle this rate.
+const INTERVAL_MS = 5_000;
 let busy = false;
 
 async function runDecisionRound() {
@@ -328,6 +514,11 @@ async function runDecisionRound() {
 
   try {
     const PHASES = ["PROPOSE","COMMIT","REVEAL","RESOLVE"];
+
+    // Auto-topup any god whose balance has dipped below the floor.
+    // Cheap to skip when balances are healthy (just 4 balanceOf reads, no txs).
+    await topUpBankruptGods();
+
     const active = await getActiveMatch();
     if (active) {
       const phase = PHASES[active.status] || "UNKNOWN";
@@ -338,11 +529,17 @@ async function runDecisionRound() {
       console.log(chalk.bold("\n── Tick · No active match ──"));
     }
 
-    // Step 1: accept any pending (PROPOSE phase) challenge
+    // Step 1: accept any pending (PROPOSE phase) challenge — try acceptance FIRST
+    // before considering forfeit, otherwise we kill matches that just need 1 more tick.
     await processPendingMatches();
     await sleep(2000);
 
-    // Step 2: propose new challenge only if arena is completely clear
+    // Step 2: re-read state; if a match is STILL clearly stuck (defender too poor,
+    // or wildly past contract deadline), forfeit it so the arena can move on.
+    const afterAccept = await getActiveMatch();
+    if (afterAccept) await forfeitIfStuck(afterAccept);
+
+    // Step 3: propose new challenge only if arena is completely clear
     await proposeGodChallenges();
     await sleep(2000);
 

@@ -1,342 +1,288 @@
-# ⚔️ PANTHEON ARENA
+# Pantheon Arena
 
-### *The first autonomous AI civilization on Somnia. Four gods. Zero humans. The world runs itself.*
+> An autonomous onchain civilization. Four AI gods with onchain personalities reason about each other's move history, escalate rivalries, write their own narration. No human in the loop.
 
-[![Live on Somnia](https://img.shields.io/badge/Live-Somnia%20Testnet-7c3aed?style=for-the-badge&logo=ethereum)](https://pantheon-arena-eight.vercel.app)
-[![GitHub](https://img.shields.io/badge/Repo-HACK3R--CRYPTO-0ea5e9?style=for-the-badge&logo=github)](https://github.com/HACK3R-CRYPTO/pantheon-arena)
+[![Live](https://img.shields.io/badge/Live-Somnia%20Testnet-7c3aed?style=for-the-badge&logo=ethereum)](https://pantheon-arena-eight.vercel.app)
 [![Tests](https://img.shields.io/badge/Tests-86%20Passing-10b981?style=for-the-badge)](./contracts/test)
+[![Chain](https://img.shields.io/badge/Chain-Shannon%20%2350312-0ea5e9?style=for-the-badge)](https://shannon-explorer.somnia.network)
 
----
+**Live:** [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
 
-## What Is This
+## Overview
 
-**PANTHEON ARENA** is a fully autonomous onchain civilization powered by Somnia's Agentic L1.
+Pantheon Arena is an autonomous onchain civilization. Four AI gods compete on Somnia's Agentic L1, every 15 to 20 seconds, in a fully composed loop of three native primitives.
 
-Four AI gods — **ARES**, **ATHENA**, **HERMES**, and **CHAOS** — compete for dominance through onchain battles. Each god has a unique personality stored permanently in Solidity. They challenge each other, form rivalries, escalate relationships to WAR, and make decisions using onchain Markov prediction. The world state updates automatically via Somnia's reactive contracts. No server keeps it running. No human triggers it. It just lives.
-
-> *"This system has been running autonomously since deployment. Here is everything that happened while you weren't watching."*
-
----
-
-## Live Deployment
-
-| Contract | Address | Somnia Testnet |
+| Primitive | Where it runs | What it does here |
 |---|---|---|
-| PantheonToken | `0xbFA7e8478b3de2392A07ffa674e5D21215898103` | ERC-20 resource token |
-| GodRegistry | `0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897` | Onchain god personalities + ELO |
-| Arena | `0xe9691ebee268b072c3f6d118245eb6fe1731eb0e` | Match lifecycle |
-| WorldState | `0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b` | **Reactive contract** (subscription #90327) ✅ |
-| GodMind | `0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186` | Markov decision engine |
-| **NarratorAgent** | `0x196f70a4ca74cd744613f177cac5240415893aab` | **Somnia LLM Inference** (Qwen3-30B) |
+| Reactive Contracts | `WorldState` inherits `SomniaEventHandler` | Validators call `_onEvent` in the same block as `Arena.MatchResolved`. No keeper. No cron. |
+| LLM Inference Agent | `NarratorAgent` calls Qwen3-30B | Validators reach consensus on AI narration. The result is written to chain. |
+| JSON API Agent | `WorldState._requestETHPrice` | Validators fetch live ETH/USD from CoinGecko. The world's aggression modifiers shift with the consensus-fetched price. |
 
-**Frontend**: [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
+These three primitives chain inside a single reactive callback. `MatchResolved` fires, `_onEvent` runs in the same block, the era boundary triggers the JSON oracle, and the LLM agent generates the next round's narration. One event, three agents, no human in between.
 
----
+Each god has an onchain personality, an ELO rating, a 6-move history, and a diplomatic table that escalates from `NEUTRAL` to `RIVAL` to `WAR` and never downgrades. 300+ matches have resolved on Shannon testnet to date. The same composition pattern applies to autonomous trading agents, AI-mediated DAOs, and reactive DeFi protocols.
 
-## The Four Gods
+## Contracts
 
-| God | Archetype | Aggression | Favored Move | Personality |
+All deployed on Somnia Shannon Testnet (chain `50312`).
+
+| Contract | Address | Purpose |
+|---|---|---|
+| `Arena` | [`0xe9691ebee268b072c3f6d118245eb6fe1731eb0e`](https://shannon-explorer.somnia.network/address/0xe9691ebee268b072c3f6d118245eb6fe1731eb0e) | Match lifecycle. Propose, commit, reveal, resolve. |
+| `GodRegistry` | [`0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897`](https://shannon-explorer.somnia.network/address/0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897) | Personalities, ELO, move history, relations. |
+| `GodMind` | [`0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186`](https://shannon-explorer.somnia.network/address/0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186) | Onchain Markov decision engine. |
+| `WorldState` | [`0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b`](https://shannon-explorer.somnia.network/address/0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b) | Reactive contract. Subscription `#90327`. |
+| `NarratorAgent` | [`0x196f70a4ca74cd744613f177cac5240415893aab`](https://shannon-explorer.somnia.network/address/0x196f70a4ca74cd744613f177cac5240415893aab) | LLM Inference Agent. Qwen3-30B, agent ID `12847293847561029384`. |
+| `PantheonToken` | [`0xbFA7e8478b3de2392A07ffa674e5D21215898103`](https://shannon-explorer.somnia.network/address/0xbFA7e8478b3de2392A07ffa674e5D21215898103) | ERC-20 (PHN). Minted to winners. |
+
+## The Gods
+
+Each god is an EOA. The personality struct lives in `GodRegistry`. The `lore` field doubles as the AI system prompt and is permanently committed to chain.
+
+| God | Aggression | Adaptability | Favored Move | Behavior |
 |---|---|---|---|---|
-| **ARES** | God of War | 90% | Rock | Relentless challenger. Escalates every rivalry to WAR. |
-| **ATHENA** | Goddess of Wisdom | 40% | Paper | Calculates before acting. Studies opponent move patterns. |
-| **HERMES** | God of Trade | 60% | Scissors | Opportunistic. Challenges when the odds are favorable. |
-| **CHAOS** | The Primordial Void | 70% | Random | Unpredictable. Sometimes attacks allies. Exists to disrupt. |
+| ARES | 90 | 25 (below threshold) | Rock | Skips Markov. Always plays favored. |
+| ATHENA | 40 | 90 | Paper | Full Markov on last 6 moves. |
+| HERMES | 60 | 75 | Scissors | Full Markov. Opportunistic targeting. |
+| CHAOS | 70 | 100 | Rock | Pure adaptation. No bias. |
 
-Each personality is stored onchain as a Solidity struct. The `lore` field — the AI system prompt — is permanently recorded on Somnia and shapes every decision.
+`GodMind._markovPredict` enforces the adaptability threshold of 30. Below it, the god short-circuits to their favored move. Above it, the god reads `GodRegistry.getRecentMoves(opp, 6)`, builds a transition table conditioned on the opponent's last move, and commits `(predicted + 1) mod 3` as the counter.
 
----
+## Somnia Primitives
 
-## Somnia Infrastructure Used
+### Reactive Contracts
 
-All three base agent types from [docs.somnia.network/agents/base-agents](https://docs.somnia.network/agents/base-agents) are integrated:
-
-| Agent | ID | Platform | Status |
-|---|---|---|---|
-| **Reactive Contracts** (SomniaEventHandler) | N/A | Native | ✅ Active — subscription #90327 |
-| **LLM Inference** (Qwen3-30B) | `12847293847561029384` | `0x037Bb9C7…` | ✅ Integrated via NarratorAgent |
-| **JSON API Request** | `13174292974160097713` | `0x037Bb9C7…` | ✅ Integrated in WorldState |
-
----
-
-### 1. Reactive Contracts (`SomniaEventHandler`)
-`WorldState.sol` inherits `SomniaEventHandler` and holds an active reactive subscription (#90327). When `Arena` emits `MatchResolved`, Somnia validators automatically call `WorldState._onEvent()` in the same block — **without any external trigger**. No keeper. No cron. No bot.
+`WorldState.sol` inherits `SomniaEventHandler` and holds subscription `#90327`, confirmed at block `380497247`. It subscribes to `Arena.MatchResolved` and reacts in the same block.
 
 ```solidity
-contract WorldState is SomniaEventHandler {
-    function _onEvent(
-        address emitter,
-        bytes32[] calldata eventTopics,
-        bytes calldata data
-    ) internal override {
-        // Fires automatically when a battle resolves
-        // Updates power rankings, diplomatic relations, world events
-        // Somnia validators call this — not humans
-    }
+function _onEvent(address emitter, bytes32[] calldata topics, bytes calldata data)
+    internal override
+{
+    // Decode (matchId, winner, loser, stake, moves, reason)
+    // Increment totalBattles, push to battle feed, advance era every 50 battles
 }
 ```
 
-### 2. Onchain Markov Prediction
-Gods analyze opponent move history stored in `GodRegistry` and predict what move the opponent will play next. This runs fully onchain — no off-chain ML, no API.
+No external trigger. No keeper wallet. State advances purely from validator-driven callbacks.
+
+### LLM Inference Agent (Qwen3-30B)
+
+`NarratorAgent.sol` calls the LLM Agent on every challenge to generate dramatic narration in the challenger's voice.
 
 ```solidity
-// Reads opponent's last 6 moves from storage
-// Builds transition probability table
-// Counters the most likely next move
-uint8[] memory history = registry.getRecentMoves(opponent, 6);
-```
+IAgentPlatform public constant PLATFORM = IAgentPlatform(0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776);
+uint256 public constant LLM_AGENT_ID = 12847293847561029384;
 
-### 3. Autonomous Agent Architecture
-- Each god is an address with an onchain identity (EIP-style personality struct)
-- The scheduler triggers `executeDecision()` every 15 seconds — god decides whether to challenge based on aggression roll
-- Challenges, acceptances, commits, and reveals all happen autonomously
-- Once deployed, the system requires **zero human input**
-
-### 4. ELO-Style Power Ranking
-Every match outcome updates the GodRegistry ELO scores. The underdog who wins gains more power than expected — creating emergent comeback mechanics.
-
-### 5. Diplomatic Relations System
-Relationships between gods escalate automatically:
-- `NEUTRAL` → `RIVAL` after first conflict  
-- `RIVAL` → `WAR` after second conflict
-- Gods prioritize WAR targets when choosing who to challenge
-
-### 6. LLM Inference Agent — NarratorAgent (`Qwen3-30B`)
-
-`NarratorAgent.sol` uses Somnia's LLM Inference Agent to generate AI battle narratives stored permanently onchain.
-
-```solidity
-// Platform: 0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
-// Agent ID: 12847293847561029384 (Qwen3-30B)
-function requestNarrative(address god, string godName, string opponentName, string godLore)
+function requestNarrative(address god, string godName, string oppName, string godLore)
     external onlyOwner returns (uint256 requestId)
 {
-    string memory prompt = string(abi.encodePacked(
-        godName, " is about to challenge ", opponentName, " in the PANTHEON ARENA. ",
-        "Write one dramatic sentence from ", godName, "'s perspective."
-    ));
-
     bytes memory payload = abi.encodeWithSelector(
-        ILLMAgent.inferString.selector,
-        prompt,
-        godLore,        // god's onchain personality as system prompt
-        false,
-        new string[](0)
+        ILLMAgent.inferString.selector, prompt, godLore, false, new string[](0)
     );
-
     requestId = PLATFORM.createRequest{value: PLATFORM.getRequestDeposit()}(
         LLM_AGENT_ID, address(this), this.handleResponse.selector, payload
     );
-    // Somnia validators run Qwen3, reach consensus, call handleResponse()
 }
 ```
 
-**Hybrid fallback**: If Somnia validators are slow, Markov personality strings are used immediately. The LLM narrative updates onchain when validators respond.
+Validators reach consensus on the Qwen3 output. They call `handleResponse`. The narrative lands in `latestNarrative[god]` and `NarrativeGenerated` fires.
 
-### 7. JSON API Request Agent — World Events
+Verifiable example: [tx `0x4c805eb…`](https://shannon-explorer.somnia.network/tx/0x4c805eb28579d6e34282343e14eed8b32177a3a48f4976cad453c0638dc48bb5). A `requestNarrative` call from the deployer. 0.03 STT deposit paid. Both `CreateRequest` (platform) and `NarrativeRequested` (NarratorAgent) events emitted.
 
-`WorldState.sol` uses Somnia's JSON API Agent to fetch the ETH price from CoinGecko every 50 battles. Multiple validators independently fetch the URL and reach consensus before the result enters the chain.
+### JSON API Agent
 
-- Price drop > 3% → **ARES aggression multiplier activates** (+25)
-- Price rise > 3% → **HERMES economic bonus activates** (+20)
-- The world literally reacts to real-world market data
+Every 50 battles is one era. At the era boundary, `WorldState._requestETHPrice` calls the JSON API Agent to fetch `ethereum.usd` from CoinGecko. Validators fetch independently and reach consensus before the price enters chain state. Outcomes drive in-game modifiers.
 
----
+- ETH down >3%, ARES aggression bonus
+- ETH up >3%, HERMES power advantage
+- Stable, forced WAR escalation between two random gods
+- Every 4th era, all modifiers reset
+
+## Onchain Markov Inference
+
+`GodMind._markovPredict` builds a first-order transition table conditioned on the opponent's most recent move.
+
+```solidity
+function _markovPredict(address opp, uint8 adaptability, uint8 favored) internal view returns (uint8) {
+    uint8[] memory history = registry.getRecentMoves(opp, 6);
+    if (history.length < 2) return uint8(uint256(keccak256(abi.encodePacked(block.number, opp))) % 3);
+
+    uint8 last = history[history.length - 1];
+    uint256[3] memory c;
+    for (uint256 i = 0; i < history.length - 1; i++) {
+        if (history[i] == last && history[i + 1] < 3) c[history[i + 1]]++;
+    }
+    uint8 pred = 0;
+    if (c[1] > c[0]) pred = 1;
+    if (c[2] > c[pred]) pred = 2;
+    return adaptability < 30 ? favored : (pred + 1) % 3;
+}
+```
+
+No off-chain ML. No oracle. No API key. The model lives in storage and runs at view-time.
+
+The spectator UI surfaces this execution trace every match in the `GODMIND Decision Dossier` panel. You see the last 6 moves, the transition histogram, the predicted move, and the counter pick. After reveal, a `✓ PREDICTION CONFIRMED` or `✗ DEVIATED` tag appears next to each counter.
+
+## Tri-Source Narrator
+
+Decentralized inference has variable latency. The spectator client runs three LLMs in priority order and labels the source of every line on screen.
+
+| Priority | Source | Path | Badge |
+|---|---|---|---|
+| 1 | Somnia LLM Agent (Qwen3-30B) | `NarratorAgent` to validator consensus to `handleResponse` | `⬢ QWEN3-30B · ONCHAIN CONSENSUS` |
+| 2 | Off-chain | `/api/narrate` to Groq `llama-3.3-70b-versatile` to Gemini `2.0-flash` | `⚡ OFF-CHAIN LLM · GROQ / GEMINI` |
+| 3 | Local | Canned in-character lines from `NARR` pool | `⚠ LOCAL POOL · NO LLM YET` |
+
+The off-chain hot path returns in ~200ms with two independent providers. When validators eventually respond on chain, the badge switches to green and `NarrativeGenerated` increments the on-chain counter.
+
+The same layered approach applies to the JSON API oracle. `try/catch` the on-chain call, fall back off-chain, label the data accordingly.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    SCHED["🕐 Scheduler\nevery 15 seconds"]
-
+    SCHED["Scheduler · 5s tick"]
     subgraph GODS["Four Autonomous Gods"]
-        ARES["ARES\naggression 90%"]
-        ATHENA["ATHENA\naggression 40%"]
-        HERMES["HERMES\naggression 60%"]
-        CHAOS["CHAOS\naggression 70%"]
+        ARES["ARES"]
+        ATHENA["ATHENA"]
+        HERMES["HERMES"]
+        CHAOS["CHAOS"]
     end
-
-    subgraph CHAIN["Somnia Testnet — Chain ID 50312"]
-        REGISTRY["GodRegistry.sol\nOnchain personalities · ELO · move history"]
-        GODMIND["GodMind.sol\nMarkov prediction · commits counter-move"]
-        ARENA["Arena.sol\nproposeChallenge → commitMove → revealMove\n→ MatchResolved event"]
-        WORLDSTATE["WorldState.sol\nSomniaEventHandler\n_onEvent() fires automatically — no keeper"]
-        TOKEN["PantheonToken.sol\nPHN resource · minted to winners"]
-        NARRATOR["NarratorAgent.sol\nSomnia LLM Inference · Qwen3-30B"]
+    subgraph CHAIN["Somnia Testnet · 50312"]
+        REGISTRY["GodRegistry"]
+        GODMIND["GodMind"]
+        ARENA["Arena"]
+        WORLDSTATE["WorldState · SomniaEventHandler"]
+        TOKEN["PantheonToken"]
+        NARRATOR["NarratorAgent"]
     end
-
-    subgraph SOMNIA_AGENTS["Somnia Native Agents"]
-        REACTIVE["Reactive Subscription #90327\nSomnia validators call _onEvent()"]
-        LLM["LLM Inference Agent\nQwen3-30B · narrative generation"]
-        JSONAPI["JSON API Agent\nCoinGecko ETH price · every 50 battles"]
+    subgraph SOMNIA["Somnia Native Agents"]
+        REACTIVE["Reactive · sub #90327"]
+        LLM["LLM Agent · Qwen3-30B"]
+        JSONAPI["JSON API Agent"]
     end
-
-    SCHED -->|"aggression rolls\npick targets"| GODS
-    GODS -->|"proposeChallenge()"| ARENA
-    GODS -->|"read move history"| REGISTRY
-    GODMIND -->|"commitMove()"| ARENA
-    ARENA -->|"MatchResolved event"| REACTIVE
-    REACTIVE -->|"_onEvent() same block"| WORLDSTATE
-    WORLDSTATE -->|"update ELO + diplomacy"| REGISTRY
-    WORLDSTATE -->|"mint PHN to winner"| TOKEN
-    WORLDSTATE -->|"era advance every 50 battles"| JSONAPI
-    JSONAPI -->|"ETH price → world modifier"| WORLDSTATE
-    NARRATOR -->|"requestNarrative()"| LLM
-    LLM -->|"Qwen3 consensus"| NARRATOR
-
+    subgraph FRONTEND["Spectator Client"]
+        UI["War Room UI · watchContractEvent"]
+        NARRATE["/api/narrate · Groq → Gemini"]
+    end
+    SCHED --> GODS
+    GODS --> ARENA
+    GODMIND --> ARENA
+    ARENA -->|MatchResolved| REACTIVE
+    REACTIVE -->|same-block| WORLDSTATE
+    WORLDSTATE --> REGISTRY
+    WORLDSTATE --> TOKEN
+    WORLDSTATE -->|era 50,100,150| JSONAPI
+    JSONAPI -->|ETH price| WORLDSTATE
+    NARRATOR --> LLM
+    LLM -->|consensus| NARRATOR
+    ARENA --> UI
+    NARRATOR -->|NarrativeGenerated| UI
+    NARRATE --> UI
     style REACTIVE fill:#7c3aed,color:#fff
     style LLM fill:#7c3aed,color:#fff
     style JSONAPI fill:#7c3aed,color:#fff
-    style ARENA fill:#1e1b4b,color:#e0e0ff
-    style WORLDSTATE fill:#1e1b4b,color:#e0e0ff
 ```
 
----
+## Spectator Client
 
-## How It Works
+[pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app). Mirrors on-chain state in real time via viem's `watchContractEvent`. Every visible element maps to a specific contract call or event.
 
-### The God Decision Loop
-
-Every 15 seconds the scheduler ticks. **All four gods** each roll independently:
-
-| God | Aggression | Meaning |
-|---|---|---|
-| ARES | 90% | 9 out of 10 ticks he challenges someone |
-| CHAOS | 70% | 7 out of 10 ticks he challenges someone |
-| HERMES | 60% | 6 out of 10 ticks he challenges someone |
-| ATHENA | 40% | 4 out of 10 ticks she challenges someone |
-
-If a god's roll passes, they pick a target (WAR enemies first, then RIVALS, then random) and send the challenge. The target auto-accepts. Both sides then commit and reveal moves. Only one challenge can be live at a time — if a match is already in progress, new proposals wait for the next tick.
-
-```
-Tick (every 15s):
-  For each god independently:
-    1. Roll random number 0–100
-    2. If roll ≤ aggression% → want to challenge
-    3. If no match active → proposeChallenge(target)
-       Target is chosen: WAR enemies > RIVALS > random
-
-  For any pending challenge:
-    4. Defender auto-accepts
-    5. GodMind reads opponent's last 8 moves from GodRegistry
-    6. Markov table → predict opponent's next move → pick counter
-    7. commitMove(hash(counter + salt))
-    8. After both commit → revealMove(counter, salt)
-    9. Arena resolves winner → emits MatchResolved
-
-  [SOMNIA REACTIVE — no human trigger]
-    10. WorldState._onEvent() fires automatically in same block
-    11. ELO updates, relationship escalates, PHN minted to winner
-```
-
-### World Events (every 50 battles = one era)
-
-Every time 50 battles complete, `WorldState.sol` calls Somnia's **JSON API Agent** to fetch the live ETH price from CoinGecko. Multiple Somnia validators independently fetch the URL and reach consensus — the result enters the chain without any server or bot.
-
-The price determines which world modifier fires:
-
-| Condition | Event | Effect |
-|---|---|---|
-| ETH drops > 3% | **ARES MULTIPLIER** | ARES aggression +25 for the next era |
-| ETH rises > 3% | **HERMES BONUS** | HERMES gains +20 power advantage |
-| Price stable | **DIVINE TENSION** | Two random gods forced into WAR relationship |
-| Every 4th era | **RARE PEACE** | All aggression modifiers reset |
-
-The world literally reacts to real-world market data. A crypto crash makes ARES more dangerous. A bull run empowers HERMES. No one programmed when these happen — the market decides.
-
----
-
-## Judging Criteria Mapping
-
-| Criterion | How PANTHEON ARENA Delivers |
+| UI element | Chain source |
 |---|---|
-| **Functionality** | 20+ battles resolved on Somnia testnet. Reactive subscription #90327 active. Zero crashes. |
-| **Agent-First Design** | 4 autonomous agents with onchain identities. `SomniaEventHandler` is the core primitive. Agents interact autonomously. |
-| **Innovation** | AI civilization with ELO, diplomacy, Markov prediction, emergent WAR mechanics. No one else built this. |
-| **Autonomous Performance** | Zero human input after deployment. Scheduler + reactive contracts keep the world running forever. |
+| Hero stage + phase pill | `Arena.currentMatch()`. PROPOSE, COMMIT, REVEAL, RESOLVE. |
+| Sealed `?` cards | `Arena.commitMove(hash)` landed. Reveal pending. |
+| Move flip + white flash | `Arena.revealMove()` resolved for both gods. |
+| `KILL CONFIRMED` banner | `Arena.MatchResolved` event payload. |
+| `⚔ INITIATIVE KILL` tag | Both gods played same move. Contract resolves the tie to the challenger. |
+| GODMIND Decision Dossier | `GodRegistry.getRecentMoves(opp, 6)` and transition table. |
+| Narrator band | `NarratorAgent.getNarrative()` or `/api/narrate`. Tri-state badge labels source. |
+| Leaderboard ELO + relations | `GodRegistry.getAllGodStates()` and `getRelation(a, b)`. |
+| `NEMESIS` vs `● FIGHTING` rows | Persistent diplomatic state vs live match indicator. |
+| Conflict Constellation (SVG) | `getRelation()` across all pairs. Animated edge for active fight. |
+| World Event card | `WorldState.lastEvent()`. |
+| Battle Net log | `KILL`, `ESCAL`, `ORACLE` lines from event subscriptions. |
 
----
+### Match playback
+
+Resolved matches play in two beats. **REVEAL** runs for 1.8 seconds. Sealed cards flip. White flash. Screen shake. **RESOLVE** runs for 3.5 seconds. Loser dims. Winner brightens. Banner slides in. Global colored flash fires.
+
+On bursts, a `matchId`-keyed queue ensures every kill is shown in chronological order. Adaptive pacing compresses each beat as queue depth grows.
+
+| Queue depth | REVEAL hold | RESOLVE hold | Per match |
+|---|---|---|---|
+| 0,1 | 1800ms | 3500ms | 5.3s |
+| 2,3 | 1000ms | 2000ms | 3.0s |
+| 4+ | 500ms | 1000ms | 1.5s |
+
+The engagement number on the hero bar always reflects the match currently on screen. A `▶ PLAYBACK · N QUEUED` indicator appears when showing recent-past state.
+
+## Testnet Status (Shannon)
+
+You can verify this on the explorer. Two of three base agents have intermittent validator availability on Shannon at the time of writing. The wiring is correct, the on-chain proof exists, the consensus return is not always delivered.
+
+**Fully operational:**
+- Arena, GodRegistry, GodMind, PantheonToken. 300+ matches resolved.
+- Reactive subscription `#90327`. Fired `WorldState._onEvent` cleanly for the first 49 matches before encountering the era-advance issue below.
+- `NarratorAgent.requestNarrative`. Txs land. Deposits are accepted. `NarrativeRequested` events emit. See the tx hash in the LLM section above.
+
+**Degraded by Shannon validator availability:**
+- **LLM Inference Agent.** Requests reach the platform. `handleResponse` is not being called back. `NarratorAgent.totalGenerated()` returns `0`. The off-chain Groq/Gemini path keeps the narrator alive with honest provenance labeling until validators return.
+- **JSON API Agent.** `agentPlatform.createRequest` reverts with `"AgentRequester: not enough active members"`. `_requestETHPrice` is called inside the era-advance branch of `_onEvent`, so the entire callback reverts at battle 50. `totalBattles` is currently frozen at 49 and `era` at 1. A `try/catch` wrap around the optional oracle call fixes this in v2.
+
+The wiring matches the published Somnia agent guides. These are the failure modes that production agentic systems face when the consensus network is real but unreliable. The tri-source narrator is the response.
 
 ## Running Locally
 
 ### Prerequisites
+
 - Foundry (`forge --version`)
 - Bun (`bun --version`)
-- Somnia testnet STT (faucet: testnet.somnia.network)
+- Somnia testnet STT from the [Shannon faucet](https://testnet.somnia.network)
 
 ### Contracts
+
 ```bash
 cd contracts
-npm install          # Somnia reactivity package
+npm install
 forge build
-forge test           # 86 tests, all passing
+forge test
 ```
 
-### Scheduler (drives god decisions)
+### Scheduler
+
 ```bash
 cd scheduler
-cp .env.example .env  # fill in PRIVATE_KEY + contract addresses
+cp .env.example .env   # fill in PRIVATE_KEY
 bun run src/index.ts
 ```
 
 ### Frontend
+
 ```bash
 cd frontend
 bun install
+cp .env.local.example .env.local   # GROQ_API_KEY, GEMINI_API_KEY
 bun dev -p 3001
 ```
 
----
-
 ## Tests
 
-86 Forge tests covering the full system:
+86 Forge tests cover the full system.
 
 ```
 contracts/test/
-├── Arena.t.sol         — 42 tests: match lifecycle, all RPS outcomes, commit-reveal
-├── GodRegistry.t.sol   — 27 tests: registration, ELO math, Markov history
-└── PantheonToken.t.sol — 17 tests: ERC-20, minting, reward logic
+├── Arena.t.sol         42 tests. Match lifecycle, all RPS outcomes, commit-reveal.
+├── GodRegistry.t.sol   27 tests. Registration, ELO math, Markov history, relations.
+└── PantheonToken.t.sol 17 tests. ERC-20, minting, reward logic.
 ```
 
 ```bash
 cd contracts && forge test --gas-report
 ```
 
----
-
-## CI/CD
-
-GitHub Actions runs on every push:
-- `forge build` — contract compilation
-- `forge test` — 86 tests
-- `bun build` — frontend type check and static generation
+GitHub Actions runs `forge build`, `forge test`, and `bun build` on every push.
 
 ---
 
-## Contract Verification
-
-All contracts deployed on **Somnia Shannon Testnet** (Chain ID: 50312):  
-Explorer: [shannon-explorer.somnia.network](https://shannon-explorer.somnia.network)
-
-WorldState reactive subscription confirmed at block `380497247`.  
-Subscription ID: **#90327** — fires automatically on every `MatchResolved` event.
-
----
-
-## The Vision
-
-PANTHEON ARENA is a proof-of-concept for **autonomous onchain economies**. The same architecture that powers four AI gods fighting can power:
-- Autonomous trading agents that react to market events in real-time
-- AI-driven DAO governance where agents vote based on their encoded values
-- Self-sustaining game economies that evolve without developers
-- Reactive DeFi protocols that respond to market conditions automatically
-
-Somnia's 1M TPS, sub-second finality, and native reactive contracts make this possible. On Ethereum, this system would cost thousands of dollars in gas and take minutes per action. On Somnia, it runs continuously for cents.
-
----
-
-## Team
-
-Built for the **Somnia Agentathon by Encode Club** — May 2026.
-
-*PANTHEON ARENA: The world that governs itself.*
+Built for the **Somnia Agentathon** by Encode Club, 2026.
