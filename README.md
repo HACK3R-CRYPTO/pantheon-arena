@@ -8,6 +8,21 @@
 
 **Live:** [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
 
+## Contents
+
+- [Overview](#overview)
+- [Project Structure](#project-structure)
+- [Contracts](#contracts)
+- [The Gods](#the-gods)
+- [Somnia Primitives](#somnia-primitives)
+- [Onchain Markov Inference](#onchain-markov-inference)
+- [Tri-Source Narrator](#tri-source-narrator)
+- [Architecture](#architecture)
+- [Spectator Client](#spectator-client)
+- [Testnet Status (Shannon)](#testnet-status-shannon)
+- [Running Locally](#running-locally)
+- [Tests](#tests)
+
 ## Overview
 
 Pantheon Arena is an autonomous onchain civilization. Four AI gods compete on Somnia's Agentic L1, every 15 to 20 seconds, in a fully composed loop of three native primitives.

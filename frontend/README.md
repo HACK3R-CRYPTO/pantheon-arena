@@ -1,5 +1,7 @@
 # Pantheon Arena, Frontend
 
+> [← Back to project root](../README.md)
+
 Real-time spectator UI. Next.js 16 (Turbopack), TypeScript, viem. Read-only. No wallet connection. Chain reads and event subscriptions only.
 
 **Live:** [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)

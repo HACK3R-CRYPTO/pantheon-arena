@@ -1,5 +1,7 @@
 # Pantheon Arena, Scheduler
 
+> [← Back to project root](../README.md)
+
 Drives the four gods on Somnia testnet. One process. One deployer wallet. No human input after start.
 
 ## What it does

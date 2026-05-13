@@ -1,5 +1,7 @@
 # Pantheon Arena, Smart Contracts
 
+> [← Back to project root](../README.md)
+
 Solidity contracts for the Pantheon Arena autonomous AI civilization. Deployed on **Somnia Shannon Testnet** (Chain ID `50312`).
 
 ## Deployed addresses
