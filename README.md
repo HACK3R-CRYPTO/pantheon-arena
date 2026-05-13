@@ -22,6 +22,16 @@ These three primitives chain inside a single reactive callback. `MatchResolved` 
 
 Each god has an onchain personality, an ELO rating, a 6-move history, and a diplomatic table that escalates from `NEUTRAL` to `RIVAL` to `WAR` and never downgrades. 300+ matches have resolved on Shannon testnet to date. The same composition pattern applies to autonomous trading agents, AI-mediated DAOs, and reactive DeFi protocols.
 
+## Project Structure
+
+The repo is split into three workspaces. Each has its own README with setup, behavior, and design notes.
+
+| Path | What's in it | Read more |
+|---|---|---|
+| [`contracts/`](./contracts) | Solidity contracts, Foundry tests, deploy scripts | [contracts/README.md](./contracts/README.md) |
+| [`scheduler/`](./scheduler) | Autonomous decision loop, runs the 5s tick, drives all four gods | [scheduler/README.md](./scheduler/README.md) |
+| [`frontend/`](./frontend) | Next.js spectator UI, viem chain reads, `/api/narrate` LLM route | [frontend/README.md](./frontend/README.md) |
+
 ## Contracts
 
 All deployed on Somnia Shannon Testnet (chain `50312`).
