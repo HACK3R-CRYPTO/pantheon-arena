@@ -1,64 +1,73 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { publicClient } from "@/lib/contracts/client";
 import { CONTRACTS, GOD_LIST } from "@/lib/contracts/config";
 import { GodRegistryABI, ArenaABI, WorldStateABI, PantheonTokenABI } from "@/lib/contracts/abis";
 import { formatEther } from "viem";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface God {
-  address: `0x${string}`;
-  name: string; epithet: string; color: string;
-  aggression: number; riskTolerance: number; adaptability: number;
-  wins: number; losses: number; powerScore: number; balance: bigint;
+// ── God config ────────────────────────────────────────────────────────────────
+const GODS_CFG = [
+  {
+    id:"ARES", title:"GOD OF WAR", epithet:"The Spear of the Pantheon",
+    callSign:"ARG-01", glyph:"▲", cssVar:"--ares", aggression:90, favored:"ROCK",
+    portrait:"/gods/ares.jpg", sigil:"/gods/ares-sigil.jpg",
+    lore:"I am the spear of the pantheon. Every silence is an insult. Every silence ends in fire.",
+    addr:"0xF2D1…844F",
+  },
+  {
+    id:"ATHENA", title:"GODDESS OF WISDOM", epithet:"The Pattern Reader",
+    callSign:"ATH-02", glyph:"■", cssVar:"--athena", aggression:40, favored:"PAPER",
+    portrait:"/gods/athena.jpg", sigil:"/gods/athena-sigil.jpg",
+    lore:"I do not waste blood. I read the pattern. The pattern always confesses.",
+    addr:"0x5678…E301",
+  },
+  {
+    id:"HERMES", title:"GOD OF TRADE", epithet:"The Market is Mine",
+    callSign:"HRM-03", glyph:"◆", cssVar:"--hermes", aggression:60, favored:"SCISSORS",
+    portrait:"/gods/hermes.jpg", sigil:"/gods/hermes-sigil.jpg",
+    lore:"I move where the price moves. The pantheon is a market. The market is mine.",
+    addr:"0x5B40…EC1D",
+  },
+  {
+    id:"CHAOS", title:"THE PRIMORDIAL VOID", epithet:"There Is Only Noise",
+    callSign:"CHX-04", glyph:"●", cssVar:"--chaos", aggression:70, favored:"RANDOM",
+    portrait:"/gods/chaos.jpg", sigil:"/gods/chaos-sigil.jpg",
+    lore:"There is no rule. There is no friend. There is only the noise I make of you.",
+    addr:"0x874e…57bE",
+  },
+];
+
+const MOVE_SYM: Record<number,string> = { 0:"✊",1:"✋",2:"✌️" };
+const REL_LABEL = ["NEUTRAL","ALLIED","RIVAL","WAR"];
+
+function cfg(name: string) { return GODS_CFG.find(g => g.id === name); }
+function cfgByAddr(addr: string) {
+  const g = GOD_LIST.find(x => x.address.toLowerCase() === addr?.toLowerCase());
+  return cfg(g?.name ?? "");
 }
-interface Battle {
-  matchId: bigint; winner: `0x${string}`; loser: `0x${string}`;
-  stake: bigint; winnerMove: number; loserMove: number;
-  blockNumber: bigint; decisionReason: string;
-}
-interface Summary { currentEra: bigint; battles: bigint; }
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-const EMOJIS     = ["✊", "📄", "✂️"];
-const MOVE_NAMES = ["Rock", "Paper", "Scissors"];
-const GOD_ICON: Record<string, string> = { ARES:"⚔️", ATHENA:"🦉", HERMES:"⚡", CHAOS:"🌀" };
-// God portrait images — drop PNG files in /public/gods/ after generating with Bing
-const GOD_IMG: Record<string, string> = {
-  ARES:   "/gods/ares.png",
-  ATHENA: "/gods/athena.png",
-  HERMES: "/gods/hermes.png",
-  CHAOS:  "/gods/chaos.png",
-};
-
-// God color → wall/face/glow mapping (GameArenaCelo style)
-const GOD_THEME: Record<string, { wall: string; face: string; glow: string }> = {
-  "#EF4444": { wall:"#7a0000", face:"linear-gradient(160deg,#ff6060 0%,#dc2626 50%,#991b1b 100%)", glow:"rgba(239,68,68,0.6)" },
-  "#EAB308": { wall:"#6b4a00", face:"linear-gradient(160deg,#fde047 0%,#ca8a04 50%,#854d0e 100%)", glow:"rgba(234,179,8,0.6)"  },
-  "#06B6D4": { wall:"#004a5a", face:"linear-gradient(160deg,#67e8f9 0%,#0891b2 50%,#0e7490 100%)", glow:"rgba(6,182,212,0.6)"  },
-  "#A855F7": { wall:"#4a006b", face:"linear-gradient(160deg,#d8b4fe 0%,#9333ea 50%,#6b21a8 100%)", glow:"rgba(168,85,247,0.6)" },
-};
-
-function godByAddr(a: string) { return GOD_LIST.find(x => x.address.toLowerCase() === a?.toLowerCase()); }
-function fmt(a: string) { return `${a?.slice(0,6)}…${a?.slice(-4)}`; }
+function shortAddr(a: string) { return `${a?.slice(0,6)}…${a?.slice(-4)}`; }
 function wr(w: number, l: number) { return w+l===0 ? 0 : Math.round(w/(w+l)*100); }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-export default function Home() {
-  const [gods,    setGods]    = useState<God[]>([]);
-  const [feed,    setFeed]    = useState<Battle[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [rels,    setRels]    = useState<Record<string, number>>({});
+// ── State ─────────────────────────────────────────────────────────────────────
+export default function Command() {
+  const [gods,    setGods]    = useState<any[]>([]);
+  const [battles, setBattles] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>(null);
+  const [rels,    setRels]    = useState<Record<string,number>>({});
+  const [block,   setBlock]   = useState(0);
+  const [killFlash, setKillFlash] = useState<string|null>(null);
   const [loading, setLoading] = useState(true);
+  const prevBattleCount = useRef(0);
 
   const load = useCallback(async () => {
     try {
-      const [gd, md, sd] = await Promise.all([
+      const [gd, md, sd, bn] = await Promise.all([
         publicClient.readContract({ address: CONTRACTS.GodRegistry, abi: GodRegistryABI, functionName: "getAllGodStates" }),
-        publicClient.readContract({ address: CONTRACTS.Arena,       abi: ArenaABI,       functionName: "getRecentMatches", args: [20n] }),
-        publicClient.readContract({ address: CONTRACTS.WorldState,  abi: WorldStateABI,  functionName: "getWorldSummary" }),
+        publicClient.readContract({ address: CONTRACTS.Arena, abi: ArenaABI, functionName: "getRecentMatches", args: [20n] }),
+        publicClient.readContract({ address: CONTRACTS.WorldState, abi: WorldStateABI, functionName: "getWorldSummary" }),
+        publicClient.getBlockNumber(),
       ]);
       const [addrs, perks, stats] = gd as any;
       const bals = await Promise.all(
@@ -66,413 +75,291 @@ export default function Home() {
           publicClient.readContract({ address: CONTRACTS.PantheonToken, abi: PantheonTokenABI, functionName: "balanceOf", args: [a] }).catch(() => 0n)
         )
       );
-      const list: God[] = (addrs as `0x${string}`[]).map((addr: `0x${string}`, i: number) => ({
+      const list = (addrs as `0x${string}`[]).map((addr: `0x${string}`, i: number) => ({
         address: addr,
-        name:         perks[i]?.name      || godByAddr(addr)?.name    || fmt(addr),
-        epithet:      perks[i]?.epithet   || godByAddr(addr)?.epithet || "",
-        color:        perks[i]?.color     || godByAddr(addr)?.color   || "#888",
-        aggression:   Number(perks[i]?.aggression    ?? 0),
-        riskTolerance:Number(perks[i]?.riskTolerance ?? 0),
-        adaptability: Number(perks[i]?.adaptability  ?? 0),
-        wins:         Number(stats[i]?.wins           ?? 0),
-        losses:       Number(stats[i]?.losses         ?? 0),
-        powerScore:   Number(stats[i]?.powerScore     ?? 1000),
-        balance:      bals[i] as bigint,
+        name: perks[i]?.name || cfgByAddr(addr)?.id || shortAddr(addr),
+        wins: Number(stats[i]?.wins ?? 0), losses: Number(stats[i]?.losses ?? 0),
+        powerScore: Number(stats[i]?.powerScore ?? 1000),
+        balance: bals[i] as bigint,
       }));
       list.sort((a,b) => b.powerScore - a.powerScore);
 
-      const rm: Record<string, number> = {};
-      for (let i = 0; i < addrs.length; i++)
-        for (let j = i+1; j < addrs.length; j++) {
-          const r = await publicClient.readContract({ address: CONTRACTS.GodRegistry, abi: GodRegistryABI, functionName: "getRelation", args: [addrs[i], addrs[j]] }).catch(() => 0);
+      const rm: Record<string,number> = {};
+      for (let i=0;i<addrs.length;i++)
+        for (let j=i+1;j<addrs.length;j++) {
+          const r = await publicClient.readContract({ address:CONTRACTS.GodRegistry, abi:GodRegistryABI, functionName:"getRelation", args:[addrs[i],addrs[j]] }).catch(()=>0);
           rm[`${addrs[i]}-${addrs[j]}`] = Number(r);
         }
 
-      const raw  = (md as unknown as any[]).filter(m => Number(m.status)===3).reverse();
-      const battles: Battle[] = raw.map(m => ({
-        matchId: m.id, winner: m.winner,
-        loser:      m.winner===m.challenger ? m.opponent   : m.challenger,
-        stake:      m.stake,
-        winnerMove: m.winner===m.challenger ? m.challengerMove : m.opponentMove,
-        loserMove:  m.winner===m.challenger ? m.opponentMove  : m.challengerMove,
-        blockNumber: m.createdBlock, decisionReason: m.decisionReason,
+      const raw = (md as unknown as any[]).filter(m=>Number(m.status)===3).reverse();
+      const blist = raw.map(m=>({
+        matchId:m.id, winner:m.winner,
+        loser:m.winner===m.challenger?m.opponent:m.challenger,
+        stake:m.stake,
+        winnerMove:m.winner===m.challenger?m.challengerMove:m.opponentMove,
+        loserMove: m.winner===m.challenger?m.opponentMove:m.challengerMove,
+        blockNumber:m.createdBlock, reason:m.decisionReason,
       }));
 
-      const s   = sd as any;
-      const sum = Array.isArray(s)
-        ? { currentEra: s[0], battles: s[1] }
-        : { currentEra: s?.currentEra ?? 1n, battles: s?.battles ?? 0n };
+      // Kill flash on new battle
+      if (blist.length > prevBattleCount.current && prevBattleCount.current > 0) {
+        const winnerCfg = cfgByAddr(blist[0].winner);
+        if (winnerCfg) {
+          setKillFlash(`var(${winnerCfg.cssVar}-g)`);
+          setTimeout(() => setKillFlash(null), 1000);
+        }
+      }
+      prevBattleCount.current = blist.length;
 
-      setGods(list); setFeed(battles); setRels(rm); setSummary(sum);
-      setLoading(false);
+      const s = sd as any;
+      const sum = Array.isArray(s) ? { currentEra:s[0], battles:s[1] } : { currentEra:s?.currentEra??1n, battles:s?.battles??0n };
+
+      setGods(list); setBattles(blist); setRels(rm); setSummary(sum);
+      setBlock(Number(bn)); setLoading(false);
     } catch(e) { console.error(e); setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { load(); const t = setInterval(load, 5000); return ()=>clearInterval(t); }, [load]);
+  useEffect(() => { const t = setInterval(()=>setBlock(b=>b+1),1000); return ()=>clearInterval(t); }, []);
 
-  const rel = (a: string, b: string) => rels[`${a}-${b}`] ?? rels[`${b}-${a}`] ?? 0;
-  const battles    = Number(summary?.battles ?? 0);
-  const nextEvent  = Math.ceil((battles+1)/50)*50;
-
-  if (loading) return (
-    <div style={{ minHeight: "100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <div style={{ color:"rgba(200,180,255,0.6)", fontSize:14, fontWeight:700, letterSpacing:"0.1em" }}>
-        AWAKENING THE GODS…
-      </div>
-    </div>
-  );
+  const rel = (a:string,b:string) => rels[`${a}-${b}`]??rels[`${b}-${a}`]??0;
+  const leader = gods[0];
+  const leaderCfg = leader ? cfg(leader.name) : null;
+  const totalBattles = summary ? Number(summary.battles) : 0;
 
   return (
-    <div style={{ minHeight:"100vh", position:"relative", overflowX:"hidden" }}>
+    <div style={{ minHeight:"100vh" }}>
+      {/* Battlefield texture */}
+      <div className="battlefield-bg" />
 
-      {/* ── Background glow blobs ──────────────────────────── */}
-      <div style={{ position:"fixed", inset:0, zIndex:0, pointerEvents:"none" }}>
-        <div style={{ position:"absolute", top:"-20%", left:"30%", width:600, height:600, borderRadius:"50%", background:"radial-gradient(circle,rgba(109,40,217,0.12) 0%,transparent 70%)" }} />
-        <div style={{ position:"absolute", top:"40%", right:"-10%", width:400, height:400, borderRadius:"50%", background:"radial-gradient(circle,rgba(59,130,246,0.08) 0%,transparent 70%)" }} />
-      </div>
+      {/* Ember particles — ARES atmosphere */}
+      <EmberParticles />
 
-      {/* ── Floating decorative icons (GameArenaCelo style) ── */}
-      <FloatingIcons />
+      {/* Arc effects — HERMES atmosphere */}
+      <ArcEffects />
 
-      <div style={{ position:"relative", zIndex:1 }}>
+      {/* Kill flash overlay */}
+      {killFlash && (
+        <div className="kill-flash fire" style={{ background: killFlash }} />
+      )}
 
-        {/* ── HERO ───────────────────────────────────────────── */}
-        <div style={{ textAlign:"center", padding:"52px 20px 40px", borderBottom:"1px solid rgba(109,40,217,0.2)" }}>
-          {/* Live pill */}
-          <div style={{ display:"inline-flex", alignItems:"center", gap:8, marginBottom:20,
-            padding:"6px 16px", borderRadius:999, background:"rgba(109,40,217,0.15)",
-            border:"1px solid rgba(109,40,217,0.35)" }}>
-            <div className="live-dot" />
-            <span style={{ fontSize:10, fontWeight:800, letterSpacing:"0.15em", color:"rgba(180,160,255,0.9)" }}>
-              AUTONOMOUS · SOMNIA TESTNET · ERA {summary?.currentEra?.toString() ?? "1"}
-            </span>
-          </div>
-
-          {/* Big headline */}
-          <h1 style={{ fontWeight:900, lineHeight:1.05, marginBottom:16,
-            fontSize: "clamp(2.4rem, 7vw, 5rem)", letterSpacing:"-0.01em" }}>
-            <span style={{ color:"white" }}>THE GODS</span>
-            <br />
-            <span style={{
-              background:"linear-gradient(135deg, #ef4444 0%, #a855f7 50%, #06b6d4 100%)",
-              WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text"
-            }}>ARE AT WAR</span>
-          </h1>
-
-          <p style={{ color:"rgba(200,180,255,0.65)", fontSize:16, marginBottom:36, maxWidth:480, margin:"0 auto 36px" }}>
-            Four AI agents with onchain personalities competing for dominance.<br />
-            <strong style={{ color:"white" }}>No human controls them.</strong>
-          </p>
-
-          {/* Stat row — 3D buttons */}
-          <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
-            <StatBtn value={String(battles)} label="Battles" wall="#3b0764" face="linear-gradient(160deg,#c084fc 0%,#7c3aed 50%,#4c1d95 100%)" glow="rgba(124,58,237,0.7)" icon="⚔️" />
-            <StatBtn value={`${nextEvent-battles}`} label="Next Event" wall="#1e3a5f" face="linear-gradient(160deg,#7dd3fc 0%,#2563eb 50%,#1e3a8a 100%)" glow="rgba(37,99,235,0.6)" icon="⚡" />
-            <StatBtn value={`Era ${summary?.currentEra?.toString() ?? "1"}`} label="Current" wall="#3b0764" face="linear-gradient(160deg,#e879f9 0%,#a21caf 50%,#701a75 100%)" glow="rgba(168,85,247,0.6)" icon="🌐" />
-            {gods[0] && <StatBtn value={gods[0].name} label="Leading" wall={GOD_THEME[gods[0].color]?.wall ?? "#333"} face={GOD_THEME[gods[0].color]?.face ?? "#666"} glow={GOD_THEME[gods[0].color]?.glow ?? "transparent"} icon="👑" />}
-          </div>
-        </div>
-
-        {/* ── WAR NARRATIVE TICKER ─────────────────────────── */}
-        {feed.length > 0 && gods.length > 0 && (
-          <WarNarrative gods={gods} feed={feed} battles={battles} />
-        )}
-
-        {/* ── GRID ───────────────────────────────────────────── */}
-        <div style={{ maxWidth:1100, margin:"0 auto", padding:"40px 20px", display:"grid",
-          gridTemplateColumns:"minmax(0,1.4fr) minmax(0,1fr)", gap:24 }}>
-
-          {/* Left — gods + conflicts */}
-          <div>
-            <SectionLabel text="THE GODS" sub="ranked by power" />
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:24 }}>
-              {gods.map((god, rank) => <GodCard key={god.address} god={god} rank={rank+1} gods={gods} rel={rel} />)}
+      {/* ── THRONE BANNER ── */}
+      <div className="throne" style={{ ["--throne-color" as any]: leaderCfg ? `var(${leaderCfg.cssVar})` : "var(--ares)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:24, position:"relative", zIndex:1 }}>
+          {/* Leader portrait */}
+          {leaderCfg && leader && (
+            <div style={{ width:88, height:88, flexShrink:0, position:"relative", border:`2px solid var(${leaderCfg.cssVar})`, overflow:"hidden",
+              boxShadow:`0 0 24px var(${leaderCfg.cssVar}-g)` }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={leaderCfg.portrait} alt={leaderCfg.id} style={{ width:"100%", height:"100%", objectFit:"cover", objectPosition:"center 20%" }} onError={e=>{(e.target as HTMLImageElement).style.display="none"}} />
+              <div style={{ position:"absolute", inset:0, background:`linear-gradient(180deg, var(${leaderCfg.cssVar}-g) 0%, transparent 40%)`, mixBlendMode:"multiply" }} />
+              <span style={{ position:"absolute", top:2, left:2, width:6, height:6, borderTop:`1px solid var(${leaderCfg.cssVar})`, borderLeft:`1px solid var(${leaderCfg.cssVar})` }} />
+              <span style={{ position:"absolute", top:2, right:2, width:6, height:6, borderTop:`1px solid var(${leaderCfg.cssVar})`, borderRight:`1px solid var(${leaderCfg.cssVar})` }} />
+              <span style={{ position:"absolute", bottom:2, left:2, width:6, height:6, borderBottom:`1px solid var(${leaderCfg.cssVar})`, borderLeft:`1px solid var(${leaderCfg.cssVar})` }} />
+              <span style={{ position:"absolute", bottom:2, right:2, width:6, height:6, borderBottom:`1px solid var(${leaderCfg.cssVar})`, borderRight:`1px solid var(${leaderCfg.cssVar})` }} />
             </div>
-            <Conflicts gods={gods} rel={rel} />
+          )}
+
+          <div style={{ flex:1 }}>
+            <div className="mono" style={{ fontSize:10, letterSpacing:"0.22em", color:"var(--text-3)", marginBottom:6, textTransform:"uppercase" }}>
+              ⚔ PANTHEON ARENA · COMMAND · SOMNIA SHANNON · CHAIN 50312
+            </div>
+            <div className="divine throne-name" style={{ fontSize:"clamp(2rem,5vw,4.5rem)" }}>
+              {leaderCfg?.id ?? "PANTHEON"}
+            </div>
+            <div className="mono" style={{ fontSize:10, letterSpacing:"0.18em", color:"var(--text-3)", marginTop:4 }}>
+              {leaderCfg?.epithet ?? "AUTONOMOUS WAR · NO HUMANS"}
+            </div>
           </div>
 
-          {/* Right — feed */}
-          <div>
-            <SectionLabel text="LIVE BATTLE FEED" sub={`${battles} resolved`} live />
-            {feed.length === 0 ? (
-              <Panel style={{ padding:48, textAlign:"center" }}>
-                <div style={{ fontSize:48, marginBottom:12 }}>⚔️</div>
-                <div style={{ fontWeight:800, color:"white", marginBottom:6 }}>First battle incoming…</div>
-                <div style={{ color:"rgba(200,180,255,0.5)", fontSize:13 }}>Gods are making their moves</div>
-              </Panel>
-            ) : (
-              <div style={{ display:"flex", flexDirection:"column", gap:12, maxHeight:"72vh", overflowY:"auto", paddingRight:4 }}>
-                {feed.map((b, i) => <BattleCard key={`${b.matchId}-${i}`} b={b} />)}
-              </div>
-            )}
+          {/* Top-right meta */}
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8, fontFamily:"JetBrains Mono, monospace" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <div className="live-dot" />
+              <span style={{ fontSize:11, color:"oklch(0.78 0.15 145)", letterSpacing:"0.12em" }}>LIVE</span>
+            </div>
+            <div style={{ fontSize:11, color:"var(--text-3)", letterSpacing:"0.1em" }}>BLOCK <span style={{ color:"var(--text-2)" }}>{block.toLocaleString()}</span></div>
+            <div style={{ fontSize:11, color:"var(--text-3)", letterSpacing:"0.1em" }}>ERA <span style={{ color:"var(--athena)" }}>{summary?.currentEra?.toString()??"1"}</span></div>
+            <div style={{ fontSize:11, color:"var(--text-3)", letterSpacing:"0.1em" }}>BATTLES <span style={{ color:"var(--text-2)" }}>{totalBattles}</span></div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+      {/* ── MARQUEE ── */}
+      <Marquee totalBattles={totalBattles} />
 
-function WarNarrative({ gods, feed, battles }: { gods: God[]; feed: Battle[]; battles: number }) {
-  const leader  = gods[0];
-  const last    = feed[0];
-  const lastWin = last ? godByAddr(last.winner) : null;
-  const lastLos = last ? godByAddr(last.loser)  : null;
-
-  // Find the god with most wins on a streak
-  const hotGod  = gods.find(g => g.wins >= 2 && g.wins > g.losses);
-  // Find who has lost the most
-  const revenge = gods.find(g => g.losses > g.wins && g.losses >= 2);
-
-  const lines: string[] = [];
-
-  if (leader) lines.push(`👑 ${leader.name} dominates with ${leader.powerScore.toLocaleString()} power — ${leader.wins}W/${leader.losses}L.`);
-  if (lastWin && lastLos) lines.push(`⚔️ Last battle: ${lastWin.name} defeated ${lastLos.name}. The ${lastWin.name === "CHAOS" ? "void" : lastWin.name.toLowerCase()} grows stronger.`);
-  if (hotGod && hotGod.name !== leader?.name) lines.push(`🔥 ${hotGod.name} is on a run — ${hotGod.wins} wins. A challenger to the throne emerges.`);
-  if (revenge) lines.push(`💀 ${revenge.name} has fallen ${revenge.losses} times. Something is about to change.`);
-  if (battles >= 10) lines.push(`⚡ ${battles} battles resolved with zero human intervention. The world runs itself.`);
-
-  if (lines.length === 0) return null;
-
-  return (
-    <div style={{
-      borderTop:"1px solid rgba(109,40,217,0.15)",
-      borderBottom:"1px solid rgba(109,40,217,0.15)",
-      background:"rgba(109,40,217,0.06)",
-      padding:"14px 0", overflow:"hidden",
-    }}>
-      <div style={{
-        maxWidth:1100, margin:"0 auto", padding:"0 24px",
-        display:"flex", gap:40, alignItems:"center",
-        overflowX:"auto",
-      }}>
-        <span style={{ fontSize:9, fontWeight:800, letterSpacing:"0.18em", color:"rgba(168,85,247,0.7)", flexShrink:0 }}>
-          WAR REPORT
-        </span>
-        {lines.map((line, i) => (
-          <span key={i} style={{
-            fontSize:12, color:"rgba(200,180,255,0.75)", fontWeight:600,
-            whiteSpace:"nowrap", flexShrink:0,
-          }}>
-            {line}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function FloatingIcons() {
-  const icons = [
-    { icon:"⚔️", top:"8%",  left:"2%",  size:64, delay:"0s",   dur:"5.2s", rotate:-15, opacity:0.35 },
-    { icon:"🛡️", top:"22%", left:"1%",  size:52, delay:"1.4s", dur:"6s",   rotate:8,   opacity:0.3  },
-    { icon:"🔱", top:"55%", left:"1%",  size:58, delay:"2.1s", dur:"5.5s", rotate:-8,  opacity:0.3  },
-    { icon:"⚔️", top:"8%",  right:"2%", size:60, delay:"0.5s", dur:"5s",   rotate:18,  opacity:0.35 },
-    { icon:"⚡", top:"35%", right:"1%", size:54, delay:"1.8s", dur:"6.2s", rotate:-5,  opacity:0.3  },
-    { icon:"🌀", top:"65%", right:"1%", size:56, delay:"2.5s", dur:"5.8s", rotate:10,  opacity:0.3  },
-  ] as any[];
-  return (
-    <>
-      {icons.map((ic, i) => (
-        <div key={i} className="icon-float" style={{
-          position:"fixed", zIndex:0, fontSize: ic.size,
-          top: ic.top, left: ic.left, right: ic.right,
-          opacity: ic.opacity, pointerEvents:"none",
-          "--rot": `${ic.rotate}deg`, "--dur": ic.dur, "--delay": ic.delay,
-          filter:"blur(0.5px)",
-        } as React.CSSProperties}>
-          {ic.icon}
+      {/* ── MAIN GRID ── */}
+      {loading ? (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:"50vh", fontFamily:"JetBrains Mono, monospace", fontSize:13, color:"var(--text-3)", letterSpacing:"0.15em" }}>
+          INITIALIZING WAR ROOM…
         </div>
-      ))}
-    </>
-  );
-}
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"340px 1fr 360px", gap:12, padding:14, maxWidth:1920, margin:"0 auto", position:"relative", zIndex:2 }}>
 
-function StatBtn({ value, label, wall, face, glow, icon }: {
-  value: string; label: string; wall: string; face: string; glow: string; icon: string;
-}) {
-  return (
-    <div style={{ borderRadius:16, background:wall, paddingBottom:6, boxShadow:`0 12px 32px -4px ${glow}` }}>
-      <div style={{
-        borderRadius:"14px 14px 12px 12px", background:face,
-        padding:"12px 20px", position:"relative", overflow:"hidden", textAlign:"center",
-        border:"2px solid rgba(255,255,255,0.45)",
-        boxShadow:"inset 0 6px 16px rgba(255,255,255,0.6), inset 0 -3px 8px rgba(0,0,0,0.3)",
-        minWidth:100,
-      }}>
-        <div style={{ position:"absolute", top:2, left:"6%", right:"6%", height:"48%",
-          background:"linear-gradient(180deg,rgba(255,255,255,0.6) 0%,transparent 100%)",
-          borderRadius:"14px 14px 50px 50px", pointerEvents:"none" }} />
-        <div style={{ position:"relative", zIndex:1 }}>
-          <div style={{ fontSize:18, marginBottom:2 }}>{icon}</div>
-          <div style={{ fontWeight:900, fontSize:20, color:"white", lineHeight:1.1, textShadow:"0 2px 4px rgba(0,0,0,0.4)" }}>{value}</div>
-          <div style={{ fontSize:9, fontWeight:800, letterSpacing:"0.1em", color:"rgba(255,255,255,0.8)", textTransform:"uppercase", marginTop:2 }}>{label}</div>
+          {/* Left: God Dossiers */}
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <SectionLabel label="GOD ROSTER" dot="war" />
+            {gods.map((god,i) => {
+              const c = cfg(god.name);
+              const godRels = gods.filter(g=>g.address!==god.address).map(g=>({ god:g, cfg:cfg(g.name), rel:rel(god.address,g.address) }));
+              const topThreat = godRels.sort((a,b)=>b.rel-a.rel)[0];
+              return <GodCard key={god.address} god={god} c={c} topThreat={topThreat} rank={i+1} wr={wr(god.wins,god.losses)} />;
+            })}
+          </div>
+
+          {/* Center: Battle Theatre + Relations */}
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <SectionLabel label="BATTLE THEATRE" dot="war" />
+            <BattleTheatre battles={battles} />
+            <SectionLabel label="CONFLICT MATRIX" dot="neutral" />
+            <RelationsMatrix gods={gods} rel={rel} />
+          </div>
+
+          {/* Right: Narrator + Battle Log */}
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <SectionLabel label="NARRATOR // QWEN3" dot="neutral" />
+            <NarratorPanel gods={gods} />
+            <SectionLabel label="BATTLE LOG" dot="war" live />
+            <BattleLog battles={battles} />
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── BOTTOM STRIP ── */}
+      <BottomStrip summary={summary} />
     </div>
   );
 }
 
-function SectionLabel({ text, sub, live }: { text: string; sub: string; live?: boolean }) {
-  return (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-        {live && <div className="live-dot" />}
-        <span style={{ fontSize:11, fontWeight:900, letterSpacing:"0.14em", color:"rgba(200,180,255,0.9)" }}>{text}</span>
-      </div>
-      <span style={{ fontSize:10, color:"rgba(200,180,255,0.45)" }}>{sub}</span>
-    </div>
-  );
-}
-
-function Panel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div style={{
-      borderRadius:20, paddingBottom:6,
-      background:"#0d0530",
-      boxShadow:"0 0 0 1.5px rgba(109,40,217,0.25), 0 20px 48px rgba(0,0,0,0.6)",
-      ...style,
-    }}>
-      <div style={{
-        borderRadius:"18px 18px 16px 16px",
-        background:"linear-gradient(180deg, #1a0550 0%, #0d0330 60%, #07021a 100%)",
-        border:"1.5px solid rgba(255,255,255,0.08)",
-        boxShadow:"inset 0 6px 20px rgba(160,100,255,0.1)",
-        overflow:"hidden",
-      }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function GodCard({ god, rank, gods, rel }: { god: God; rank: number; gods: God[]; rel:(a:string,b:string)=>number }) {
-  const t     = GOD_THEME[god.color] ?? { wall:"#222", face:"#444", glow:"transparent" };
-  const rate  = wr(god.wins, god.losses);
-  const maxP  = Math.max(...gods.map(x => x.powerScore), 1);
-  const pct   = Math.round(god.powerScore/maxP*100);
-  const enemies = gods.filter(x => x.address!==god.address && rel(god.address,x.address)>=2);
-  const isTop   = rank===1;
+// ── GOD CARD (war dossier) ────────────────────────────────────────────────────
+function GodCard({ god, c, topThreat, rank, wr }: any) {
+  const [imgErr, setImgErr] = useState(false);
+  const [sigilErr, setSigilErr] = useState(false);
+  const color  = c ? `var(${c.cssVar})`   : "#888";
+  const colorD = c ? `var(${c.cssVar}-d)` : "#444";
+  const colorG = c ? `var(${c.cssVar}-g)` : "transparent";
+  const isWar  = topThreat?.rel === 3;
 
   return (
     <Link href={`/god/${god.address}`} style={{ textDecoration:"none" }}>
-      <div style={{
-        borderRadius:20, background:t.wall, paddingBottom:6,
-        boxShadow:`0 14px 36px -6px ${t.glow}, 0 0 0 1px rgba(255,255,255,0.06)`,
-        transition:"transform 0.15s, box-shadow 0.15s", cursor:"pointer",
-      }}
-        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform="translateY(-4px)"; (e.currentTarget as HTMLDivElement).style.boxShadow=`0 20px 48px -6px ${t.glow}, 0 0 0 1px rgba(255,255,255,0.1)` }}
-        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform=""; (e.currentTarget as HTMLDivElement).style.boxShadow=`0 14px 36px -6px ${t.glow}, 0 0 0 1px rgba(255,255,255,0.06)` }}
-      >
-        <div style={{
-          borderRadius:"18px 18px 16px 16px", background:t.face,
-          position:"relative", overflow:"hidden",
-          border:"2px solid rgba(255,255,255,0.35)",
-          boxShadow:"inset 0 8px 20px rgba(255,255,255,0.55), inset 0 -3px 8px rgba(0,0,0,0.35)",
-          padding:"16px 16px 14px",
-        }}>
-          {/* Gloss */}
-          <div style={{
-            position:"absolute", top:2, left:"4%", right:"4%", height:"44%",
-            background:"linear-gradient(180deg,rgba(255,255,255,0.55) 0%,transparent 100%)",
-            borderRadius:"18px 18px 60px 60px", pointerEvents:"none",
-          }} />
+      <div className="frame stone" style={{
+        position:"relative", isolation:"isolate", overflow:"hidden",
+        background:`linear-gradient(180deg, ${colorG} -60%, oklch(0.16 0.014 280/0.85) 38%, oklch(0.14 0.014 280/0.92) 100%)`,
+        borderColor: isWar ? "var(--war)" : colorD,
+        animation: isWar ? "warPulse 1.4s infinite" : "none",
+        transition:"border-color 0.4s",
+      }}>
+        <span className="cc-bl" /><span className="cc-br" />
 
-          <div style={{ position:"relative", zIndex:1 }}>
-            {/* Header */}
-            <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:12 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                {/* Portrait — uses AI-generated image if available, falls back to emoji */}
-                <div style={{
-                  width:56, height:56, borderRadius:14, flexShrink:0,
-                  background:"rgba(0,0,0,0.3)", border:"2.5px solid rgba(255,255,255,0.5)",
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  fontSize:26, boxShadow:`0 0 20px ${god.color}50, inset 0 2px 8px rgba(0,0,0,0.4)`,
-                  overflow:"hidden", position:"relative",
-                }}>
-                  {GOD_IMG[god.name] ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={GOD_IMG[god.name]}
-                      alt={god.name}
-                      style={{ width:"100%", height:"100%", objectFit:"cover" }}
-                      onError={e => { (e.target as HTMLImageElement).style.display="none"; }}
-                    />
-                  ) : null}
-                  <span style={{
-                    position:"absolute", inset:0, display:"flex",
-                    alignItems:"center", justifyContent:"center", fontSize:26
-                  }}>
-                    {GOD_ICON[god.name] ?? "⚡"}
-                  </span>
-                </div>
-                <div>
-                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                    {isTop && <span className="crown" style={{ fontSize:14 }}>👑</span>}
-                    <span style={{ fontWeight:900, fontSize:18, color:"white", textShadow:"0 2px 6px rgba(0,0,0,0.5)", lineHeight:1 }}>{god.name}</span>
-                    <span style={{ fontSize:10, color:"rgba(255,255,255,0.6)", fontWeight:800 }}>#{rank}</span>
-                  </div>
-                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.6)", marginTop:2 }}>{god.epithet}</div>
-                </div>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontWeight:900, fontSize:18, color:"white", textShadow:"0 2px 4px rgba(0,0,0,0.5)" }}>{god.powerScore.toLocaleString()}</div>
-                <div style={{ fontSize:9, color:"rgba(255,255,255,0.5)", letterSpacing:"0.1em" }}>PWR</div>
-              </div>
-            </div>
+        {/* Sigil watermark */}
+        {c && !sigilErr && (
+          <div aria-hidden style={{ position:"absolute", right:-40, top:-10, width:240, height:240,
+            backgroundImage:`url(${c.sigil})`, backgroundSize:"contain", backgroundRepeat:"no-repeat",
+            backgroundPosition:"center", opacity:0.22, mixBlendMode:"screen", pointerEvents:"none",
+            filter:"saturate(1.15) brightness(1.05)", zIndex:-1 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={c.sigil} alt="" style={{ display:"none" }} onError={()=>setSigilErr(true)} />
+          </div>
+        )}
 
-            {/* Power bar */}
-            <div style={{ marginBottom:12 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", fontSize:9, color:"rgba(255,255,255,0.6)", marginBottom:4, fontWeight:700, letterSpacing:"0.08em" }}>
-                <span>POWER</span><span>{pct}%</span>
-              </div>
-              <div style={{ height:6, background:"rgba(0,0,0,0.35)", borderRadius:999, overflow:"hidden", border:"1px solid rgba(255,255,255,0.15)" }}>
-                <div style={{ height:"100%", width:`${pct}%`, background:"rgba(255,255,255,0.85)", borderRadius:999, boxShadow:"0 0 8px rgba(255,255,255,0.5)", transition:"width 1s" }} />
-              </div>
-            </div>
+        {/* Dossier ID strip */}
+        <div className="mono" style={{ display:"flex", justifyContent:"space-between", padding:"6px 12px",
+          fontSize:9, letterSpacing:"0.18em", color:"var(--text-4)",
+          borderBottom:"1px solid var(--line-soft)", background:"oklch(0.10 0.01 280/0.5)" }}>
+          <span>DOSSIER · {c?.callSign}</span>
+          <span>RANK {rank}/4</span>
+          <span style={{ color }}>● {c?.addr}</span>
+        </div>
 
-            {/* W/L/WR */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6, marginBottom:12 }}>
-              {[["WIN",god.wins,"#4ade80"],["LOSS",god.losses,"#f87171"],["WIN%",`${rate}%`,"white"]].map(([l,v,c]) => (
-                <div key={l as string} style={{ background:"rgba(0,0,0,0.3)", borderRadius:10, padding:"6px 4px", textAlign:"center", border:"1px solid rgba(255,255,255,0.15)" }}>
-                  <div style={{ fontWeight:900, fontSize:16, color:c as string, lineHeight:1 }}>{v}</div>
-                  <div style={{ fontSize:8, color:"rgba(255,255,255,0.5)", letterSpacing:"0.1em", fontWeight:800 }}>{l}</div>
-                </div>
-              ))}
-            </div>
+        {/* Portrait + identity */}
+        <div style={{ display:"flex", gap:12, padding:12, alignItems:"flex-start", borderBottom:"1px solid var(--line-soft)" }}>
+          {/* Portrait */}
+          <div style={{ width:78, height:78, flexShrink:0, position:"relative", border:`1px solid ${colorD}`,
+            boxShadow:`inset 0 0 0 1px oklch(0.08 0.01 280/0.7), 0 0 14px ${colorG}`, overflow:"hidden" }}>
+            {c && !imgErr && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={c.portrait} alt={god.name} style={{ width:"100%", height:"100%", objectFit:"cover", objectPosition:"center 18%" }}
+                onError={()=>setImgErr(true)} />
+            )}
+            <div style={{ position:"absolute", inset:0, background:`linear-gradient(180deg,${colorG} 0%,transparent 35%,oklch(0.08 0.01 280/0.45) 100%)`, mixBlendMode:"multiply" }} />
+            {/* Inner corner brackets */}
+            <span style={{ position:"absolute", top:2, left:2, width:6, height:6, borderTop:`1px solid ${color}`, borderLeft:`1px solid ${color}` }} />
+            <span style={{ position:"absolute", top:2, right:2, width:6, height:6, borderTop:`1px solid ${color}`, borderRight:`1px solid ${color}` }} />
+            <span style={{ position:"absolute", bottom:2, left:2, width:6, height:6, borderBottom:`1px solid ${color}`, borderLeft:`1px solid ${color}` }} />
+            <span style={{ position:"absolute", bottom:2, right:2, width:6, height:6, borderBottom:`1px solid ${color}`, borderRight:`1px solid ${color}` }} />
+            {!c || imgErr ? <span style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, fontWeight:900, color }}>{c?.glyph}</span> : null}
+          </div>
 
-            {/* Stat bars */}
-            <div style={{ display:"flex", flexDirection:"column", gap:5, marginBottom:12 }}>
-              {[["AGG",god.aggression],["RISK",god.riskTolerance],["ADP",god.adaptability]].map(([l,v]) => (
-                <div key={l as string} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontSize:8, color:"rgba(255,255,255,0.5)", width:24, fontWeight:800, letterSpacing:"0.08em" }}>{l}</span>
-                  <div style={{ flex:1, height:3, background:"rgba(0,0,0,0.35)", borderRadius:999 }}>
-                    <div style={{ height:"100%", width:`${v}%`, background:"rgba(255,255,255,0.6)", borderRadius:999 }} />
-                  </div>
-                  <span style={{ fontSize:8, color:"rgba(255,255,255,0.5)", width:16, textAlign:"right", fontWeight:700 }}>{v}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Footer */}
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", borderTop:"1px solid rgba(255,255,255,0.15)", paddingTop:10 }}>
-              <span style={{ fontSize:10, color:"rgba(255,255,255,0.6)", fontWeight:700 }}>
-                💰 {parseFloat(formatEther(god.balance)).toFixed(0)} PHN
+          <div style={{ flex:1, minWidth:0 }}>
+            <div className="divine" style={{ fontSize:26, color, lineHeight:1, textShadow:`0 0 12px ${colorG}` }}>{god.name}</div>
+            <div className="mono" style={{ fontSize:9, color:"var(--text-3)", marginTop:5, letterSpacing:"0.16em", textTransform:"uppercase" }}>{c?.title}</div>
+            <div className="mono" style={{ fontSize:9, color:colorD, marginTop:3, letterSpacing:"0.14em" }}>// {c?.epithet}</div>
+            <div style={{ marginTop:8 }}>
+              <span className="mono" style={{ fontSize:9, letterSpacing:"0.18em",
+                color: isWar ? "var(--war)" : "var(--text-3)",
+                border:`1px solid ${isWar?"var(--war)":"var(--line)"}`,
+                padding:"2px 6px", animation: isWar ? "flicker 1.1s infinite" : "none" }}>
+                {isWar ? "● AT WAR" : "● STANDBY"}
               </span>
-              {enemies.length > 0 && (
-                <div style={{ display:"flex", gap:4 }}>
-                  {enemies.slice(0,2).map(e => (
-                    <span key={e.address} style={{
-                      fontSize:9, fontWeight:800, padding:"2px 7px", borderRadius:999,
-                      background:"rgba(0,0,0,0.35)", border:"1px solid rgba(255,255,255,0.25)", color:"rgba(255,255,255,0.8)",
-                    }}>
-                      {rel(god.address,e.address)===3?"⚔":"~"} {e.name}
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", borderBottom:"1px solid var(--line-soft)" }}>
+          {[
+            { label:"POWER",  val:god.powerScore.toLocaleString(), sub:"ELO · ONCHAIN",   color },
+            { label:"KILLS",  val:String(god.wins),                sub:"CONFIRMED",        color:"var(--text)" },
+            { label:"DEATHS", val:String(god.losses),              sub:`${wr}% WIN RATE`, color:"var(--text-2)" },
+          ].map((s,i) => (
+            <div key={s.label} style={{ padding:"10px 12px", borderRight:i<2?"1px solid var(--line-soft)":"none" }}>
+              <div className="mono" style={{ fontSize:9, letterSpacing:"0.16em", color:"var(--text-4)", textTransform:"uppercase", marginBottom:4 }}>{s.label}</div>
+              <div className="mono" style={{ fontSize:20, fontWeight:500, color:s.color, lineHeight:1 }}>{s.val}</div>
+              <div className="mono" style={{ fontSize:8, color:"var(--text-4)", marginTop:4, letterSpacing:"0.14em" }}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Aggression + favored */}
+        <div style={{ padding:"10px 12px", borderBottom:"1px solid var(--line-soft)" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+            <div className="mono" style={{ fontSize:9, letterSpacing:"0.16em", color:"var(--text-4)", textTransform:"uppercase" }}>RUTHLESSNESS</div>
+            <div className="mono" style={{ fontSize:10, color }}>{c?.aggression ?? 0}%</div>
+          </div>
+          <div style={{ height:3, background:"var(--line-soft)" }}>
+            <div style={{ height:"100%", width:`${c?.aggression??0}%`, background:`linear-gradient(90deg,${color},${colorD})` }} />
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:10 }}>
+            <div>
+              <div className="mono" style={{ fontSize:8, color:"var(--text-4)", letterSpacing:"0.14em" }}>FAVORED</div>
+              <div className="mono" style={{ fontSize:11, color:"var(--text-2)", marginTop:3 }}>{c?.favored}</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div className="mono" style={{ fontSize:8, color:"var(--text-4)", letterSpacing:"0.14em" }}>PHN SEIZED</div>
+              <div className="mono" style={{ fontSize:11, color:"var(--athena-d)", marginTop:3 }}>{(god.wins*17+god.losses*4).toLocaleString()}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Top threat */}
+        {topThreat && (
+          <div style={{ padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
+            <span className="mono" style={{ fontSize:9, color:"var(--text-4)", letterSpacing:"0.16em" }}>TOP THREAT</span>
+            <span className="mono" style={{ fontSize:11, color: topThreat.cfg ? `var(${topThreat.cfg.cssVar})` : "var(--text-2)", letterSpacing:"0.12em" }}>{topThreat.god.name}</span>
+            <span style={{ flex:1 }} />
+            <span className="mono" style={{
+              fontSize:9, fontWeight:700, padding:"2px 8px", letterSpacing:"0.1em",
+              color: topThreat.rel===3?"var(--war)":topThreat.rel===2?"var(--rival)":"var(--text-3)",
+              border:`1px solid ${topThreat.rel===3?"var(--war)":topThreat.rel===2?"var(--rival)":"var(--line)"}`,
+              animation: topThreat.rel===3?"flicker 1.2s infinite":"none",
+            }}>{REL_LABEL[topThreat.rel]}</span>
+          </div>
+        )}
+
+        {/* Lore */}
+        <div style={{ padding:"10px 12px 12px", borderTop:"1px solid var(--line-soft)" }}>
+          <div className="mono" style={{ fontSize:10, fontStyle:"italic", color:"var(--text-3)", lineHeight:1.5 }}>
+            "{c?.lore}"
           </div>
         </div>
       </div>
@@ -480,114 +367,284 @@ function GodCard({ god, rank, gods, rel }: { god: God; rank: number; gods: God[]
   );
 }
 
-function Conflicts({ gods, rel }: { gods: God[]; rel:(a:string,b:string)=>number }) {
-  const pairs = gods.flatMap((a,i)=>gods.slice(i+1).map(b=>({a,b,r:rel(a.address,b.address)}))).filter(p=>p.r>0);
-  if (!pairs.length) return null;
+// ── BATTLE THEATRE ────────────────────────────────────────────────────────────
+function BattleTheatre({ battles }: { battles: any[] }) {
+  const last = battles[0];
+  if (!last) return (
+    <div className="frame" style={{ padding:40, textAlign:"center", position:"relative" }}>
+      <span className="cc-bl"/><span className="cc-br"/>
+      <div style={{ fontSize:48, marginBottom:12, opacity:0.5 }}>⚔</div>
+      <div className="mono" style={{ fontSize:11, letterSpacing:"0.16em", color:"var(--text-3)" }}>AWAITING CONFLICT</div>
+    </div>
+  );
+
+  const winCfg = cfgByAddr(last.winner);
+  const losCfg = cfgByAddr(last.loser);
+
   return (
-    <Panel>
-      <div style={{ padding:"14px 16px" }}>
-        <div style={{ fontSize:10, fontWeight:800, letterSpacing:"0.12em", color:"rgba(200,180,255,0.6)", marginBottom:12 }}>ACTIVE CONFLICTS</div>
-        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-          {pairs.map(({a,b,r}) => (
-            <div key={`${a.address}${b.address}`} style={{
-              display:"flex", alignItems:"center", justifyContent:"space-between",
-              padding:"8px 12px", borderRadius:12,
-              background:"rgba(109,40,217,0.12)", border:"1px solid rgba(109,40,217,0.2)",
-            }}>
-              <span style={{ fontWeight:800, fontSize:13, color:a.color, textShadow:`0 0 12px ${a.color}60` }}>{a.name}</span>
-              <span style={{
-                fontSize:10, fontWeight:900, padding:"3px 10px", borderRadius:999,
-                ...(r===3
-                  ? { background:"rgba(239,68,68,0.2)", border:"1px solid rgba(239,68,68,0.4)", color:"#f87171" }
-                  : r===2
-                  ? { background:"rgba(251,146,60,0.2)", border:"1px solid rgba(251,146,60,0.4)", color:"#fb923c" }
-                  : { background:"rgba(16,185,129,0.2)", border:"1px solid rgba(16,185,129,0.4)", color:"#34d399" }
-                )
-              }}>
-                {r===3?"⚔ WAR":r===2?"~ RIVAL":"✦ ALLY"}
-              </span>
-              <span style={{ fontWeight:800, fontSize:13, color:b.color, textShadow:`0 0 12px ${b.color}60` }}>{b.name}</span>
-            </div>
-          ))}
-        </div>
+    <div className="frame" style={{ position:"relative" }}>
+      <span className="cc-bl"/><span className="cc-br"/>
+      <div style={{ padding:"8px 12px", borderBottom:"1px solid var(--line-soft)", display:"flex", justifyContent:"space-between" }}>
+        <span className="mono" style={{ fontSize:9, letterSpacing:"0.16em", color:"var(--text-3)", textTransform:"uppercase" }}>LAST RESOLVED</span>
+        <span className="mono" style={{ fontSize:9, color:"var(--text-4)" }}>Block #{last.blockNumber?.toString()}</span>
       </div>
-    </Panel>
+
+      <div style={{ padding:20 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:20 }}>
+          {/* Winner */}
+          <div style={{ flex:1, textAlign:"center" }}>
+            <div style={{ fontSize:52, marginBottom:8 }}>{MOVE_SYM[last.winnerMove]??""}</div>
+            <div className="divine" style={{ fontSize:22, color:winCfg?`var(${winCfg.cssVar})`:"#fff", marginBottom:4 }}>{winCfg?.id??shortAddr(last.winner)}</div>
+            <div className="mono" style={{ fontSize:9, letterSpacing:"0.16em", color:"oklch(0.72 0.18 145)" }}>VICTORY</div>
+            <div className="mono" style={{ fontSize:13, color:"oklch(0.72 0.18 145)", marginTop:4, fontWeight:700 }}>
+              +{parseFloat(formatEther(last.stake)).toFixed(0)} PHN SEIZED
+            </div>
+          </div>
+
+          <div className="divine" style={{ fontSize:24, color:"var(--text-4)", letterSpacing:"0.16em" }}>VS</div>
+
+          {/* Loser */}
+          <div style={{ flex:1, textAlign:"center", opacity:0.45 }}>
+            <div style={{ fontSize:48, marginBottom:8 }}>{MOVE_SYM[last.loserMove]??""}</div>
+            <div className="divine" style={{ fontSize:20, color:losCfg?`var(${losCfg.cssVar})`:"#888", marginBottom:4 }}>{losCfg?.id??shortAddr(last.loser)}</div>
+            <div className="mono" style={{ fontSize:9, letterSpacing:"0.16em", color:"var(--text-3)" }}>DEFEATED</div>
+          </div>
+        </div>
+
+        {last.reason && (
+          <div className="mono" style={{ marginTop:16, fontSize:11, fontStyle:"italic", color:"var(--text-3)",
+            background:"oklch(0.12 0.01 280/0.6)", padding:"10px 14px", borderLeft:`2px solid ${winCfg?`var(${winCfg.cssVar})`:"var(--line)"}`,
+            lineHeight:1.6 }}>
+            {winCfg?.glyph} {last.reason}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
-function BattleCard({ b }: { b: Battle }) {
-  const win = godByAddr(b.winner);
-  const los = godByAddr(b.loser);
+// ── RELATIONS MATRIX ───────────────────────────────────────────────────────────
+function RelationsMatrix({ gods, rel }: { gods:any[]; rel:(a:string,b:string)=>number }) {
   return (
-    <div className="slide-in" style={{
-      borderRadius:16, paddingBottom:5,
-      background: win ? GOD_THEME[win.color]?.wall ?? "#1a0550" : "#1a0550",
-      boxShadow: `0 8px 24px -4px ${win ? GOD_THEME[win.color]?.glow ?? "rgba(109,40,217,0.4)" : "rgba(109,40,217,0.4)"}`,
-    }}>
-      <div style={{
-        borderRadius:"14px 14px 12px 12px",
-        background: win ? GOD_THEME[win.color]?.face ?? "#2a0c6e" : "linear-gradient(160deg,#6d28d9 0%,#3b0764 50%,#2d0b8c 100%)",
-        border:"1.5px solid rgba(255,255,255,0.3)",
-        boxShadow:"inset 0 5px 14px rgba(255,255,255,0.5), inset 0 -2px 5px rgba(0,0,0,0.3)",
-        padding:"12px 14px", position:"relative", overflow:"hidden",
-      }}>
-        <div style={{ position:"absolute", top:1, left:"5%", right:"5%", height:"44%",
-          background:"linear-gradient(180deg,rgba(255,255,255,0.5) 0%,transparent 100%)",
-          borderRadius:"14px 14px 50px 50px", pointerEvents:"none" }} />
+    <div className="frame" style={{ position:"relative" }}>
+      <span className="cc-bl"/><span className="cc-br"/>
+      <div style={{ padding:14, overflowX:"auto" }}>
+        <table style={{ width:"100%", borderCollapse:"separate", borderSpacing:3 }}>
+          <thead>
+            <tr>
+              <th style={{ width:52 }}/>
+              {gods.map(g => {
+                const c = cfg(g.name);
+                return (
+                  <th key={g.address} className="mono" style={{ textAlign:"center", fontSize:9, letterSpacing:"0.1em",
+                    color:c?`var(${c.cssVar})`:"var(--text-3)", fontWeight:700, paddingBottom:6 }}>
+                    {c?.glyph} {g.name.slice(0,3)}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {gods.map(row => {
+              const rc = cfg(row.name);
+              return (
+                <tr key={row.address}>
+                  <td className="mono" style={{ fontSize:9, letterSpacing:"0.1em",
+                    color:rc?`var(${rc.cssVar})`:"var(--text-3)", paddingRight:8, whiteSpace:"nowrap" }}>
+                    {rc?.glyph} {row.name.slice(0,3)}
+                  </td>
+                  {gods.map(col => {
+                    if (col.address === row.address) return (
+                      <td key={col.address} style={{ background:"oklch(0.10 0.01 280/0.5)",
+                        textAlign:"center", padding:"6px 4px" }}>
+                        <span className="mono" style={{ fontSize:8, color:"var(--text-4)" }}>{rc?.glyph}</span>
+                      </td>
+                    );
+                    const r = rel(row.address, col.address);
+                    const rcolor = r===3?"var(--war)":r===2?"var(--rival)":r===1?"oklch(0.65 0.18 145)":"var(--text-4)";
+                    return (
+                      <td key={col.address} className="mono" style={{
+                        textAlign:"center", padding:"6px 4px", fontSize:9, fontWeight:700,
+                        letterSpacing:"0.06em", color:rcolor,
+                        background:r>0?"oklch(0.12 0.01 280/0.8)":"oklch(0.10 0.01 280/0.5)",
+                        border:r>0?`1px solid ${rcolor}44`:"1px solid transparent",
+                        animation:r===3?"flicker 2s infinite":"none",
+                      }}>
+                        {r===3?"WAR":r===2?"RIVAL":r===1?"ALLY":"·"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
-        <div style={{ position:"relative", zIndex:1 }}>
-          {/* Winner */}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ fontSize:20 }}>{EMOJIS[b.winnerMove] ?? "?"}</span>
-              <div>
-                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <span style={{ fontWeight:900, fontSize:15, color:"white", textShadow:"0 2px 4px rgba(0,0,0,0.5)" }}>
-                    {win?.name ?? fmt(b.winner)}
-                  </span>
-                  <span style={{ fontSize:8, fontWeight:800, padding:"2px 6px", borderRadius:999,
-                    background:"rgba(16,185,129,0.3)", border:"1px solid rgba(16,185,129,0.5)", color:"#4ade80" }}>
-                    WINNER
-                  </span>
+// ── NARRATOR PANEL ─────────────────────────────────────────────────────────────
+const LINES: Record<string,string[]> = {
+  ARES:   ["ARES sharpens the spear that already drinks.","ARES sees an open throat and smiles.","ARES is bored of silence. The silence ends now.","The forge of ARES burns red on the seventh hour."],
+  ATHENA: ["ATHENA has counted your last six moves.","The pattern speaks; ATHENA answers in kind.","ATHENA waits until the question is already answered.","Wisdom is the longest blade in the pantheon."],
+  HERMES: ["HERMES has spotted the spread. Already inside.","Speed is information. HERMES is both.","HERMES reads the meta. The meta bends.","The market moved. HERMES was already there."],
+  CHAOS:  ["CHAOS does not plan. CHAOS is the plan.","You studied the patterns. CHAOS burned them.","The void chose this move. The void chooses all.","CHAOS exists to remind you that all signal is noise."],
+};
+
+function NarratorPanel({ gods }: { gods: any[] }) {
+  const [lines, setLines] = useState<{name:string;c:any;line:string}[]>([]);
+  useEffect(()=>{
+    const init = gods.map(g=>({ name:g.name, c:cfg(g.name), line:(LINES[g.name]??["The god is silent."])[Math.floor(Math.random()*4)] }));
+    setLines(init);
+    const t = setInterval(()=>setLines(prev=>prev.map(l=>Math.random()>0.7?{...l,line:(LINES[l.name]??["…"])[Math.floor(Math.random()*4)]}:l)),4000);
+    return ()=>clearInterval(t);
+  },[gods.length]);
+
+  return (
+    <div className="frame" style={{ position:"relative" }}>
+      <span className="cc-bl"/><span className="cc-br"/>
+      <div style={{ padding:12, display:"flex", flexDirection:"column", gap:12 }}>
+        {lines.map(({name,c,line})=>(
+          <div key={name} style={{ borderLeft:`2px solid ${c?`var(${c.cssVar})`:"var(--line)"}`, paddingLeft:10 }}>
+            <div className="mono" style={{ fontSize:9, letterSpacing:"0.14em", color:c?`var(${c.cssVar})`:"var(--text-3)", marginBottom:4 }}>{c?.glyph} {name}</div>
+            <div className="mono" style={{ fontSize:11, fontStyle:"italic", color:"var(--text-2)", lineHeight:1.5 }}>"{line}"</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── BATTLE LOG ────────────────────────────────────────────────────────────────
+function BattleLog({ battles }: { battles: any[] }) {
+  return (
+    <div className="frame" style={{ flex:1, position:"relative", overflow:"hidden" }}>
+      <span className="cc-bl"/><span className="cc-br"/>
+      <div style={{ maxHeight:340, overflowY:"auto" }}>
+        {battles.length===0 ? (
+          <div className="mono" style={{ padding:20, textAlign:"center", fontSize:11, color:"var(--text-3)" }}>awaiting conflicts…</div>
+        ) : battles.map((b,i)=>{
+          const wc = cfgByAddr(b.winner);
+          const lc = cfgByAddr(b.loser);
+          return (
+            <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px",
+              borderBottom:"1px solid var(--line-soft)", animation:i===0?"slide-in 0.3s ease-out":"none" }}>
+              <span style={{ fontSize:18, flexShrink:0 }}>{MOVE_SYM[b.winnerMove]??""}</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
+                  <span className="divine" style={{ fontSize:13, color:wc?`var(${wc.cssVar})`:"var(--text)" }}>{wc?.id??shortAddr(b.winner)}</span>
+                  <span className="mono" style={{ fontSize:8, color:"var(--text-4)" }}>KILLED</span>
+                  <span className="mono" style={{ fontSize:11, color:lc?`var(${lc.cssVar})`:"var(--text-3)", opacity:0.6 }}>{lc?.id??shortAddr(b.loser)}</span>
                 </div>
-                <div style={{ fontSize:9, color:"rgba(255,255,255,0.6)" }}>{MOVE_NAMES[b.winnerMove]}</div>
+                <div className="mono" style={{ fontSize:9, color:"var(--text-4)" }}>#{b.blockNumber?.toString()}</div>
+              </div>
+              <div className="mono" style={{ fontSize:12, fontWeight:700, color:"oklch(0.72 0.18 145)", whiteSpace:"nowrap" }}>
+                +{parseFloat(formatEther(b.stake)).toFixed(0)}
               </div>
             </div>
-            <span style={{ fontWeight:900, fontSize:14, color:"#4ade80", textShadow:"0 0 12px rgba(74,222,128,0.5)" }}>
-              +{parseFloat(formatEther(b.stake)).toFixed(0)} PHN
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── MARQUEE ────────────────────────────────────────────────────────────────────
+function Marquee({ totalBattles }: { totalBattles: number }) {
+  const items = [
+    `${totalBattles} BATTLES RESOLVED · ZERO HUMAN INTERVENTION`,
+    "WORLDSTATE._onEvent() FIRES AUTONOMOUSLY VIA SOMNIA REACTIVE SUBSCRIPTION #90327",
+    "MARKOV ENGINE · ONCHAIN TRANSITION PROBABILITY TABLES · NO OFF-CHAIN ML",
+    "NARRATOR AGENT · QWEN3-30B · SOMNIA LLM INFERENCE · CONSENSUS-VALIDATED",
+    "RELATIONSHIP ESCALATION IS PERMANENT — WAR DOES NOT DOWNGRADE",
+    "SOMNIA SHANNON TESTNET · 1M+ TPS · SUB-SECOND FINALITY",
+  ];
+  const doubled = [...items,...items];
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:14, padding:"6px 22px",
+      borderBottom:"1px solid var(--line)", background:"oklch(0.15 0.014 280/0.7)",
+      overflow:"hidden", position:"relative", zIndex:3 }}>
+      <span className="mono" style={{ flexShrink:0, fontSize:10, letterSpacing:"0.16em",
+        color:"var(--bg)", background:"var(--war)", padding:"3px 8px", textTransform:"uppercase" }}>LIVE FEED</span>
+      <div style={{ overflow:"hidden", flex:1,
+        WebkitMaskImage:"linear-gradient(90deg,transparent,black 5%,black 95%,transparent)",
+        maskImage:"linear-gradient(90deg,transparent,black 5%,black 95%,transparent)" }}>
+        <div className="marquee-track mono" style={{ display:"inline-block", whiteSpace:"nowrap", fontSize:12, color:"var(--text-2)" }}>
+          {doubled.map((t,i)=>(
+            <span key={i}>
+              <span style={{ color:t.includes("WAR")||t.includes("BATTLE")?`var(--war)`:undefined }}>{t}</span>
+              <span style={{ color:"var(--text-4)", margin:"0 20px" }}>◆</span>
             </span>
-          </div>
-
-          {/* VS divider */}
-          <div style={{ display:"flex", alignItems:"center", gap:8, margin:"6px 0" }}>
-            <div style={{ flex:1, height:1, background:"rgba(255,255,255,0.15)" }} />
-            <span style={{ fontSize:9, color:"rgba(255,255,255,0.5)", fontWeight:800 }}>VS</span>
-            <div style={{ flex:1, height:1, background:"rgba(255,255,255,0.15)" }} />
-          </div>
-
-          {/* Loser */}
-          <div style={{ display:"flex", alignItems:"center", gap:8, opacity:0.55, marginBottom:8 }}>
-            <span style={{ fontSize:18 }}>{EMOJIS[b.loserMove] ?? "?"}</span>
-            <div>
-              <div style={{ fontWeight:700, fontSize:13, color:"white" }}>{los?.name ?? fmt(b.loser)}</div>
-              <div style={{ fontSize:9, color:"rgba(255,255,255,0.5)" }}>{MOVE_NAMES[b.loserMove]}</div>
-            </div>
-          </div>
-
-          {/* Reasoning */}
-          {b.decisionReason && (
-            <div style={{ fontSize:10, fontFamily:"monospace", color:"rgba(255,255,255,0.45)",
-              background:"rgba(0,0,0,0.3)", borderRadius:8, padding:"5px 10px", marginBottom:6,
-              border:"1px solid rgba(255,255,255,0.08)", overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
-              <span style={{ color:"#c084fc" }}>&gt;</span> {b.decisionReason}
-            </div>
-          )}
-
-          <div style={{ fontSize:9, color:"rgba(255,255,255,0.35)", fontFamily:"monospace" }}>
-            Block #{b.blockNumber?.toString()}
-          </div>
+          ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── BOTTOM STRIP ───────────────────────────────────────────────────────────────
+function BottomStrip({ summary }: { summary: any }) {
+  return (
+    <div className="mono" style={{ borderTop:"1px solid var(--line)", background:"oklch(0.15 0.014 280/0.7)",
+      padding:"10px 22px", display:"flex", gap:24, flexWrap:"wrap",
+      fontSize:10, letterSpacing:"0.08em", color:"var(--text-3)", position:"relative", zIndex:3 }}>
+      {[
+        { l:"ARENA",      v:"0xe9691ebe…" },
+        { l:"WORLDSTATE", v:"0x5544ad3b… ✅ #90327" },
+        { l:"REGISTRY",   v:"0x17522cd4…" },
+        { l:"TOKEN",      v:"0xbfa7e847…" },
+        { l:"NARRATOR",   v:"0x196f70a4… LLM" },
+        { l:"BATTLES",    v:summary?.battles?.toString()??"0" },
+      ].map(c=>(
+        <div key={c.l} style={{ display:"flex", gap:6, alignItems:"center" }}>
+          <span style={{ color:"var(--text-4)" }}>{c.l}</span>
+          <span style={{ color:"var(--text-2)" }}>{c.v}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── HELPERS ────────────────────────────────────────────────────────────────────
+function SectionLabel({ label, dot, live }: { label:string; dot:string; live?:boolean }) {
+  return (
+    <div className="mono" style={{ display:"flex", alignItems:"center", gap:8, fontSize:11, letterSpacing:"0.14em", color:"var(--text-3)", textTransform:"uppercase" }}>
+      {dot==="war"     && <div className="war-dot"/>}
+      {dot==="green"   && <div className="live-dot"/>}
+      {dot==="neutral" && <div style={{ width:6, height:6, borderRadius:"50%", background:"var(--neutral)", flexShrink:0 }}/>}
+      {label}
+      {live && <span style={{ color:"var(--war)", marginLeft:4 }}>● LIVE</span>}
+    </div>
+  );
+}
+
+function EmberParticles() {
+  return (
+    <div className="embers">
+      {Array.from({length:12}).map((_,i)=>(
+        <div key={i} className="ember" style={{
+          left:`${8+i*7}%`,
+          animationDelay:`${i*1.3}s`,
+          animationDuration:`${8+i*1.5}s`,
+          bottom:0,
+        }}/>
+      ))}
+    </div>
+  );
+}
+
+function ArcEffects() {
+  return (
+    <div className="arcs">
+      {Array.from({length:6}).map((_,i)=>(
+        <div key={i} className="arc" style={{
+          top:`${15+i*14}%`, left:`${60+i*4}%`,
+          width:`${80+i*20}px`,
+          animationDelay:`${i*2.1}s`,
+          animationDuration:`${4+i}s`,
+        }}/>
+      ))}
     </div>
   );
 }

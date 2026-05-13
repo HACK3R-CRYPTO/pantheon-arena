@@ -1,68 +1,208 @@
 @import "tailwindcss";
 
-/* ── GameArenaCelo color system ─────────────────────────────── */
+/* ── PANTHEON ARENA — War Room Design System ─────────────────── */
 :root {
-  --bg:      #04001a;
-  --bg2:     #07021a;
-  --panel:   #0d0530;
-  --purple1: #1a0550;
-  --purple2: #2a0c6e;
-  --border:  rgba(255,255,255,0.1);
-  --glow:    rgba(109,40,217,0.5);
-  --muted:   rgba(220,200,255,0.55);
-  --text:    #f0eeff;
-  --green:   #10b981;
-  --gold:    #f59e0b;
+  --bg:          oklch(0.13 0.012 280);
+  --bg-2:        oklch(0.16 0.014 280);
+  --panel:       oklch(0.165 0.016 280 / 0.62);
+  --panel-solid: oklch(0.18 0.018 280);
+  --line:        oklch(0.32 0.02 280 / 0.55);
+  --line-soft:   oklch(0.28 0.018 280 / 0.35);
+  --text:        oklch(0.94 0.01 280);
+  --text-2:      oklch(0.74 0.015 280);
+  --text-3:      oklch(0.52 0.018 280);
+  --text-4:      oklch(0.4 0.018 280);
+
+  --ares:    oklch(0.62 0.22 25);
+  --ares-d:  oklch(0.42 0.20 25);
+  --ares-g:  oklch(0.30 0.18 25);
+
+  --athena:   oklch(0.80 0.16 85);
+  --athena-d: oklch(0.55 0.15 85);
+  --athena-g: oklch(0.38 0.13 85);
+
+  --hermes:   oklch(0.80 0.17 205);
+  --hermes-d: oklch(0.55 0.16 205);
+  --hermes-g: oklch(0.38 0.14 205);
+
+  --chaos:   oklch(0.60 0.22 305);
+  --chaos-d: oklch(0.42 0.20 305);
+  --chaos-g: oklch(0.30 0.18 305);
+
+  --war:     oklch(0.68 0.24 25);
+  --rival:   oklch(0.78 0.18 70);
+  --neutral: oklch(0.45 0.02 280);
+  --green:   oklch(0.65 0.18 145);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: system-ui, -apple-system, sans-serif;
+* { box-sizing: border-box; border-radius: 0 !important; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: "Space Grotesk", system-ui, sans-serif; }
+body {
   min-height: 100vh;
-  overscroll-behavior: none;
+  overflow-x: hidden;
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 20%,  oklch(0.32 0.20 25 / 0.32), transparent 55%),
+    radial-gradient(ellipse 65% 55% at 85% 25%,  oklch(0.42 0.14 85 / 0.16), transparent 60%),
+    radial-gradient(ellipse 75% 60% at 20% 85%,  oklch(0.40 0.16 205 / 0.16), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 85% 85%,  oklch(0.32 0.20 305 / 0.24), transparent 55%),
+    var(--bg);
 }
 
-/* ── Floating icon animation (GameArenaCelo style) ──────────── */
-@keyframes icon-float {
-  0%, 100% { transform: translateY(0px) rotate(var(--rot, 0deg)); }
-  50%       { transform: translateY(-12px) rotate(var(--rot, 0deg)); }
+/* Scanlines */
+body::before {
+  content: "";
+  position: fixed; inset: 0; pointer-events: none;
+  background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 3px);
+  mix-blend-mode: overlay;
+  z-index: 9999;
 }
-.icon-float { animation: icon-float var(--dur, 5s) ease-in-out infinite var(--delay, 0s); }
+/* Vignette */
+body::after {
+  content: "";
+  position: fixed; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 120% 90% at 50% 50%, transparent 55%, oklch(0.08 0.01 280 / 0.85) 100%);
+  z-index: 1;
+}
 
-/* ── Other animations ───────────────────────────────────────── */
-@keyframes pulse-glow {
-  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--green); }
-  50%       { opacity: 0.5; box-shadow: 0 0 14px var(--green); }
+/* ── Battlefield texture ─────────────────────────────────────── */
+.battlefield-bg {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  opacity: 0.55;
+  background-image: url("/battlefield.jpg");
+  background-size: 1100px 1100px;
+  background-position: center;
+  background-repeat: repeat;
+  mix-blend-mode: screen;
+  filter: brightness(0.55) contrast(1.15) saturate(0.85);
+}
+
+/* ── Ember particles ─────────────────────────────────────────── */
+.embers { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.ember {
+  position: absolute; width: 2px; height: 2px;
+  background: oklch(0.78 0.22 30);
+  box-shadow: 0 0 8px oklch(0.72 0.22 30), 0 0 14px oklch(0.62 0.22 25 / 0.6);
+  animation: emberRise linear infinite;
+}
+@keyframes emberRise {
+  0%   { transform: translateY(0) translateX(0); opacity: 0; }
+  8%   { opacity: 1; }
+  90%  { opacity: 0.6; }
+  100% { transform: translateY(-100vh) translateX(40px); opacity: 0; }
+}
+
+/* ── Electric arcs ───────────────────────────────────────────── */
+.arcs { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.arc {
+  position: absolute; height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(0.85 0.18 205), transparent);
+  box-shadow: 0 0 6px oklch(0.78 0.18 205);
+  opacity: 0;
+  animation: arcFlick linear infinite;
+}
+@keyframes arcFlick {
+  0%, 92%, 100% { opacity: 0; }
+  93%  { opacity: 1; }
+  94%  { opacity: 0.2; }
+  95%  { opacity: 0.9; }
+  96%  { opacity: 0; }
+}
+
+/* ── HUD Frame ───────────────────────────────────────────────── */
+.frame {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(6px) saturate(115%);
+}
+.frame::before { content:""; position:absolute; top:-2px; left:-2px; width:14px; height:14px; border:2px solid var(--text-2); border-width:2px 0 0 2px; pointer-events:none; }
+.frame::after  { content:""; position:absolute; top:-2px; right:-2px; width:14px; height:14px; border:2px solid var(--text-2); border-width:2px 2px 0 0; pointer-events:none; }
+.cc-bl { position:absolute; bottom:-2px; left:-2px; width:14px; height:14px; border:2px solid var(--text-2); border-width:0 0 2px 2px; pointer-events:none; }
+.cc-br { position:absolute; bottom:-2px; right:-2px; width:14px; height:14px; border:2px solid var(--text-2); border-width:0 2px 2px 0; pointer-events:none; }
+
+/* ── Stone texture for cards ─────────────────────────────────── */
+.stone {
+  background-image:
+    repeating-linear-gradient(28deg, transparent 0 17px, oklch(0.08 0.01 280 / 0.18) 17px 18px),
+    repeating-linear-gradient(-62deg, transparent 0 23px, oklch(0.08 0.01 280 / 0.12) 23px 24px);
+}
+
+/* ── Fonts ───────────────────────────────────────────────────── */
+.mono   { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.divine { font-family: "Cinzel", "Trajan Pro", serif; font-weight: 900; letter-spacing: 0.08em; }
+
+/* ── Kill flash ──────────────────────────────────────────────── */
+.kill-flash {
+  position: fixed; inset: 0; z-index: 99; pointer-events: none;
+  opacity: 0; mix-blend-mode: screen;
+}
+.kill-flash.fire { animation: killFlash 0.9s ease-out 1; }
+@keyframes killFlash {
+  0%   { opacity: 0; }
+  8%   { opacity: 0.42; }
+  18%  { opacity: 0.18; }
+  32%  { opacity: 0.34; }
+  100% { opacity: 0; }
+}
+
+/* ── Animations ──────────────────────────────────────────────── */
+@keyframes warPulse {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.62 0.22 25/0.55); }
+  50%       { box-shadow: 0 0 20px 3px oklch(0.62 0.22 25/0.3); }
+}
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+@keyframes pulseDot {
+  0%, 100% { opacity:1; box-shadow:0 0 10px var(--war); }
+  50%       { opacity:0.4; box-shadow:0 0 4px var(--war); }
+}
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 @keyframes slide-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes pop-in {
-  0%   { opacity: 0; transform: scale(0.9); }
-  70%  { transform: scale(1.03); }
-  100% { opacity: 1; transform: scale(1); }
-}
-@keyframes crown {
-  0%, 100% { transform: translateY(0) rotate(-8deg); }
-  50%       { transform: translateY(-5px) rotate(8deg); }
+  from { opacity:0; transform:translateX(10px); }
+  to   { opacity:1; transform:translateX(0); }
 }
 
 .live-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--green);
-  animation: pulse-glow 2s ease-in-out infinite;
+  width:6px; height:6px; border-radius:50%;
+  background:var(--green); box-shadow:0 0 8px var(--green);
+  animation: flicker 2s infinite;
+  flex-shrink: 0;
 }
-.slide-in { animation: slide-in 0.25s ease-out both; }
-.pop-in   { animation: pop-in 0.3s cubic-bezier(0.16,1,0.3,1) both; }
-.crown    { animation: crown 1.8s ease-in-out infinite; display: inline-block; }
+.war-dot {
+  width:6px; height:6px; border-radius:50%;
+  background:var(--war); box-shadow:0 0 10px var(--war);
+  animation: pulseDot 1s infinite;
+  flex-shrink: 0;
+}
+.marquee-track { animation: marquee 60s linear infinite; }
 
-/* ── 3D Wall+Face card mixin ────────────────────────────────── */
-/* Use with inline styles for wall/face colors */
+/* ── Throne banner ───────────────────────────────────────────── */
+.throne {
+  position: relative;
+  padding: 18px 26px 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, oklch(0.10 0.012 280/0.95), oklch(0.13 0.012 280/0.85));
+  overflow: hidden;
+  z-index: 2;
+}
+.throne::before {
+  content:""; position:absolute; inset:0;
+  background: radial-gradient(ellipse 50% 80% at 50% 90%, var(--throne-color, var(--ares-g)) 0%, transparent 60%);
+  opacity: 0.55; pointer-events: none;
+}
+.throne::after {
+  content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px;
+  background: var(--throne-color, var(--ares));
+  box-shadow: 0 0 16px var(--throne-color, var(--ares));
+}
 
-::-webkit-scrollbar { width: 3px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+/* Scrollbar */
+::-webkit-scrollbar { width:4px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--line); }
+::selection { background:oklch(0.55 0.22 25/0.4); color:var(--text); }
