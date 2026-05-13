@@ -47,7 +47,7 @@ const walletClient = createWalletClient({
 // ── NarratorAgent — Somnia LLM Inference with Markov fallback ────────────────
 // Platform: 0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
 // Agent:    12847293847561029384 (Qwen3-30B LLM Inference)
-const NARRATOR_ADDRESS = (process.env.NARRATOR_ADDRESS || "0x196f70a4ca74cd744613f177cac5240415893aab") as `0x${string}`;
+const NARRATOR_ADDRESS = (process.env.NARRATOR_ADDRESS || "0x9282048b837b1d3f8e325cdf99c7e31c0163cac3") as `0x${string}`;
 const NarratorABI = parseAbi([
   "function requestNarrative(address god, string godName, string opponentName, string godLore) external returns (uint256)",
   "function getNarrative(address god) external view returns (string)",

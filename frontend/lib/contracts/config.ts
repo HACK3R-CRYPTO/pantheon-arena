@@ -19,7 +19,7 @@ export const CONTRACTS = {
   Arena:          "0xe9691ebee268b072c3f6d118245eb6fe1731eb0e" as `0x${string}`,
   WorldState:     "0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b" as `0x${string}`, // reactive subscription #90327
   GodMind:        "0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186" as `0x${string}`,
-  NarratorAgent:  "0x196f70a4ca74cd744613f177cac5240415893aab" as `0x${string}`, // Somnia LLM Inference (Qwen3-30B)
+  NarratorAgent:  "0x9282048b837b1d3f8e325cdf99c7e31c0163cac3" as `0x${string}`, // Somnia LLM Inference (Qwen3-30B)
 } as const;
 
 // ── God wallet addresses ─────────────────────────────────────────────────────

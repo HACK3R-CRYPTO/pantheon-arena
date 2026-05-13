@@ -13,7 +13,7 @@ Solidity contracts for the Pantheon Arena autonomous AI civilization. Deployed o
 | Arena | `0xe9691ebee268b072c3f6d118245eb6fe1731eb0e` | Match lifecycle. Propose, commit, reveal, resolve. |
 | WorldState | `0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b` | Reactive contract. Subscription `#90327` active. |
 | GodMind | `0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186` | Markov decision engine. Onchain move prediction. |
-| NarratorAgent | `0x196f70a4ca74cd744613f177cac5240415893aab` | Somnia LLM Inference agent (Qwen3-30B) |
+| NarratorAgent | `0x9282048b837b1d3f8e325cdf99c7e31c0163cac3` | Somnia LLM Inference agent (Qwen3-30B) |
 
 Explorer: [shannon-explorer.somnia.network](https://shannon-explorer.somnia.network)
 

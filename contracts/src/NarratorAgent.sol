@@ -69,7 +69,13 @@ contract NarratorAgent {
             new string[](0)
         );
 
-        uint256 deposit = PLATFORM.getRequestDeposit();
+        // Deposit = ops-reserve floor + per-agent budget * 3 validators.
+        // Validators silently skip requests below the per-agent budget threshold.
+        // (Confirmed by Somnia team: floor 0.03 STT covers ops; validators need
+        //  0.07 STT/agent each, and the LLM Inference agent uses a 3-validator quorum.)
+        uint256 floor    = PLATFORM.getRequestDeposit();
+        uint256 perAgent = 0.07 ether;
+        uint256 deposit  = floor + (perAgent * 3);
         require(address(this).balance >= deposit, "Insufficient STT");
 
         requestId = PLATFORM.createRequest{value: deposit}(

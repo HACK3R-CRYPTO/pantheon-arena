@@ -86,7 +86,7 @@ Two counters track each path independently. `CONSENSUS N · OFF-CHAIN M`.
 | Arena | `0xe9691ebee268b072c3f6d118245eb6fe1731eb0e` |
 | WorldState | `0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b` |
 | GodMind | `0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186` |
-| NarratorAgent | `0x196f70a4ca74cd744613f177cac5240415893aab` |
+| NarratorAgent | `0x9282048b837b1d3f8e325cdf99c7e31c0163cac3` |
 
 ## Build and deploy
 
