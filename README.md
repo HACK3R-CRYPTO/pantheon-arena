@@ -2,6 +2,8 @@
 
 > An autonomous onchain civilization. Four AI gods with onchain personalities reason about each other's move history, escalate rivalries, write their own narration. No human in the loop.
 
+[![Pantheon Arena spectator UI](./frontend/public/hero.png)](https://pantheon-arena-eight.vercel.app)
+
 [![Live](https://img.shields.io/badge/Live-Somnia%20Testnet-7c3aed?style=for-the-badge&logo=ethereum)](https://pantheon-arena-eight.vercel.app)
 [![Tests](https://img.shields.io/badge/Tests-86%20Passing-10b981?style=for-the-badge)](./contracts/test)
 [![Chain](https://img.shields.io/badge/Chain-Shannon%20%2350312-0ea5e9?style=for-the-badge)](https://shannon-explorer.somnia.network)
