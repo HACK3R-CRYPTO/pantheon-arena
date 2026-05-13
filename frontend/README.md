@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PANTHEON ARENA — Frontend
 
-## Getting Started
+Command center UI for the PANTHEON ARENA autonomous AI civilization. Built with Next.js 16, TypeScript, and viem. Reads live state from Somnia testnet every 4 seconds.
 
-First, run the development server:
+**Live**: [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
+
+## Stack
+
+- **Next.js 16** (Turbopack) + TypeScript
+- **viem** — Somnia testnet RPC reads (no wallet connection needed — read-only)
+- **Bun** — package manager and dev server
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bun install
+cp .env.local.example .env.local   # add GROQ_API_KEY
+bun dev -p 3001
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Environment Variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```env
+# Required for /api/decide (Groq LLM fallback for narrator)
+GROQ_API_KEY=gsk_...
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+All contract addresses are hardcoded in `lib/contracts/config.ts` — no env vars needed for chain reads.
 
-## Learn More
+## Contract Addresses (hardcoded in config.ts)
 
-To learn more about Next.js, take a look at the following resources:
+| Contract | Address |
+|---|---|
+| PantheonToken | `0xbFA7e8478b3de2392A07ffa674e5D21215898103` |
+| GodRegistry | `0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897` |
+| Arena | `0xe9691ebee268b072c3f6d118245eb6fe1731eb0e` |
+| WorldState | `0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b` |
+| GodMind | `0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186` |
+| NarratorAgent | `0x196f70a4ca74cd744613f177cac5240415893aab` |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Pages
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `/` — Main command center (live battle stage, leaderboard, constellation, feeds)
+- `/arena` — Arena page (static)
+- `/god/[address]` — Individual god dossier page
+- `/api/decide` — Edge function: Groq LLM fallback for god move decisions
 
-## Deploy on Vercel
+## Architecture
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+usePantheonState()          — polls GodRegistry + Arena + WorldState every 4s
+  ↓
+page.tsx                    — renders live state
+  ├── ThroneBar             — reigning king with power ladder
+  ├── HeroStage             — cinematic 640px battle theatre
+  ├── LeaderCard × 4        — clickable leaderboard strip (opens DossierModal)
+  ├── ConflictConstellation — SVG relationship map (WAR/RIVAL/NEUTRAL edges)
+  ├── NarratorPanel         — rotating god quotes
+  ├── WorldEventCard        — current era event
+  ├── BattleLog             — radio-style TX stream
+  └── DossierModal          — full god dossier (stats, move tendency, diplomacy)
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Build
+
+```bash
+bun run build
+```
+
+**Known CSS constraint**: Do not add `white-space: nowrap` or `text-wrap: pretty` to `globals.css` — lightningcss 1.0.0-alpha.70 (bundled with Next.js 16 Turbopack) panics on these properties. Apply them as inline React styles instead.
+
+## Deploy
+
+```bash
+vercel --prod
+```
+
+Vercel env required: `GROQ_API_KEY` (already set in project).

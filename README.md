@@ -31,8 +31,6 @@ Four AI gods — **ARES**, **ATHENA**, **HERMES**, and **CHAOS** — compete for
 
 **Frontend**: [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
 
-**Frontend**: [pantheon-arena-eight.vercel.app](https://pantheon-arena-eight.vercel.app)
-
 ---
 
 ## The Four Gods
@@ -146,33 +144,50 @@ function requestNarrative(address god, string godName, string opponentName, stri
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     PANTHEON ARENA                          │
-│                                                             │
-│  Scheduler (15s)                                            │
-│      │                                                      │
-│      ▼                                                      │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  Arena.sol                                          │   │
-│  │  proposeChallenge → acceptChallenge →               │   │
-│  │  commitMove → revealMove → MatchResolved event      │   │
-│  └──────────────────────┬──────────────────────────────┘   │
-│                         │ MatchResolved event               │
-│                         │                                   │
-│          [SOMNIA REACTIVE — no human trigger]               │
-│                         ▼                                   │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  WorldState.sol (SomniaEventHandler)                │   │
-│  │  _onEvent() fires automatically in same block       │   │
-│  │  Updates: power rankings, diplomatic relations,     │   │
-│  │           battle feed, world events (every 50)      │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                             │
-│  GodRegistry.sol — onchain personalities, ELO, history     │
-│  GodMind.sol     — Markov decision engine, decision log     │
-│  PantheonToken   — PHN resource token, earned by winning    │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    SCHED["🕐 Scheduler\nevery 15 seconds"]
+
+    subgraph GODS["Four Autonomous Gods"]
+        ARES["ARES\naggression 90%"]
+        ATHENA["ATHENA\naggression 40%"]
+        HERMES["HERMES\naggression 60%"]
+        CHAOS["CHAOS\naggression 70%"]
+    end
+
+    subgraph CHAIN["Somnia Testnet — Chain ID 50312"]
+        REGISTRY["GodRegistry.sol\nOnchain personalities · ELO · move history"]
+        GODMIND["GodMind.sol\nMarkov prediction · commits counter-move"]
+        ARENA["Arena.sol\nproposeChallenge → commitMove → revealMove\n→ MatchResolved event"]
+        WORLDSTATE["WorldState.sol\nSomniaEventHandler\n_onEvent() fires automatically — no keeper"]
+        TOKEN["PantheonToken.sol\nPHN resource · minted to winners"]
+        NARRATOR["NarratorAgent.sol\nSomnia LLM Inference · Qwen3-30B"]
+    end
+
+    subgraph SOMNIA_AGENTS["Somnia Native Agents"]
+        REACTIVE["Reactive Subscription #90327\nSomnia validators call _onEvent()"]
+        LLM["LLM Inference Agent\nQwen3-30B · narrative generation"]
+        JSONAPI["JSON API Agent\nCoinGecko ETH price · every 50 battles"]
+    end
+
+    SCHED -->|"aggression rolls\npick targets"| GODS
+    GODS -->|"proposeChallenge()"| ARENA
+    GODS -->|"read move history"| REGISTRY
+    GODMIND -->|"commitMove()"| ARENA
+    ARENA -->|"MatchResolved event"| REACTIVE
+    REACTIVE -->|"_onEvent() same block"| WORLDSTATE
+    WORLDSTATE -->|"update ELO + diplomacy"| REGISTRY
+    WORLDSTATE -->|"mint PHN to winner"| TOKEN
+    WORLDSTATE -->|"era advance every 50 battles"| JSONAPI
+    JSONAPI -->|"ETH price → world modifier"| WORLDSTATE
+    NARRATOR -->|"requestNarrative()"| LLM
+    LLM -->|"Qwen3 consensus"| NARRATOR
+
+    style REACTIVE fill:#7c3aed,color:#fff
+    style LLM fill:#7c3aed,color:#fff
+    style JSONAPI fill:#7c3aed,color:#fff
+    style ARENA fill:#1e1b4b,color:#e0e0ff
+    style WORLDSTATE fill:#1e1b4b,color:#e0e0ff
 ```
 
 ---
@@ -180,25 +195,53 @@ function requestNarrative(address god, string godName, string opponentName, stri
 ## How It Works
 
 ### The God Decision Loop
+
+Every 15 seconds the scheduler ticks. **All four gods** each roll independently:
+
+| God | Aggression | Meaning |
+|---|---|---|
+| ARES | 90% | 9 out of 10 ticks he challenges someone |
+| CHAOS | 70% | 7 out of 10 ticks he challenges someone |
+| HERMES | 60% | 6 out of 10 ticks he challenges someone |
+| ATHENA | 40% | 4 out of 10 ticks she challenges someone |
+
+If a god's roll passes, they pick a target (WAR enemies first, then RIVALS, then random) and send the challenge. The target auto-accepts. Both sides then commit and reveal moves. Only one challenge can be live at a time — if a match is already in progress, new proposals wait for the next tick.
+
 ```
-Every 15 seconds:
-  1. Aggression roll (ARES: 90% challenge, ATHENA: 40%)
-  2. Pick target (WAR enemies first, then RIVALS)
-  3. proposeChallenge() → opponent auto-accepts
-  4. Both gods commit hashed moves (Markov prediction)
-  5. Both gods reveal moves
-  6. Arena resolves → MatchResolved event emitted
-  7. [REACTIVE] WorldState.onEvent() fires automatically
-  8. Power scores update, relationships escalate
-  9. GOTO 1
+Tick (every 15s):
+  For each god independently:
+    1. Roll random number 0–100
+    2. If roll ≤ aggression% → want to challenge
+    3. If no match active → proposeChallenge(target)
+       Target is chosen: WAR enemies > RIVALS > random
+
+  For any pending challenge:
+    4. Defender auto-accepts
+    5. GodMind reads opponent's last 8 moves from GodRegistry
+    6. Markov table → predict opponent's next move → pick counter
+    7. commitMove(hash(counter + salt))
+    8. After both commit → revealMove(counter, salt)
+    9. Arena resolves winner → emits MatchResolved
+
+  [SOMNIA REACTIVE — no human trigger]
+    10. WorldState._onEvent() fires automatically in same block
+    11. ELO updates, relationship escalates, PHN minted to winner
 ```
 
-### World Events (every 50 battles)
-Every era advance triggers a deterministic world event:
-- **Divine Surge** — all gods become more aggressive
-- **Envy of Rivals** — strongest god weakened
-- **Divine Tension** — two gods forced into WAR
-- **Rare Peace** — aggression modifiers reset
+### World Events (every 50 battles = one era)
+
+Every time 50 battles complete, `WorldState.sol` calls Somnia's **JSON API Agent** to fetch the live ETH price from CoinGecko. Multiple Somnia validators independently fetch the URL and reach consensus — the result enters the chain without any server or bot.
+
+The price determines which world modifier fires:
+
+| Condition | Event | Effect |
+|---|---|---|
+| ETH drops > 3% | **ARES MULTIPLIER** | ARES aggression +25 for the next era |
+| ETH rises > 3% | **HERMES BONUS** | HERMES gains +20 power advantage |
+| Price stable | **DIVINE TENSION** | Two random gods forced into WAR relationship |
+| Every 4th era | **RARE PEACE** | All aggression modifiers reset |
+
+The world literally reacts to real-world market data. A crypto crash makes ARES more dangerous. A bull run empowers HERMES. No one programmed when these happen — the market decides.
 
 ---
 

@@ -14,11 +14,12 @@ export const somniaTestnet = defineChain({
 
 // ── Deployed contract addresses — Somnia testnet (chain 50312) ──────────────
 export const CONTRACTS = {
-  PantheonToken: "0xbFA7e8478b3de2392A07ffa674e5D21215898103" as `0x${string}`,
-  GodRegistry: "0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897" as `0x${string}`,
-  Arena: "0xe9691ebee268b072c3f6d118245eb6fe1731eb0e" as `0x${string}`,
-  WorldState: "0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b" as `0x${string}`,
-  GodMind: "0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186" as `0x${string}`,
+  PantheonToken:  "0xbFA7e8478b3de2392A07ffa674e5D21215898103" as `0x${string}`,
+  GodRegistry:    "0x17522Cd4B5EEf3fc0aCaAfd6CD1817ff4eEA6897" as `0x${string}`,
+  Arena:          "0xe9691ebee268b072c3f6d118245eb6fe1731eb0e" as `0x${string}`,
+  WorldState:     "0x5544ad3b23144ef0f659d871aa1d63c1ce496d1b" as `0x${string}`, // reactive subscription #90327
+  GodMind:        "0x7f8f5d53b8db950f17ee9f98edf1dd8bf6101186" as `0x${string}`,
+  NarratorAgent:  "0x196f70a4ca74cd744613f177cac5240415893aab" as `0x${string}`, // Somnia LLM Inference (Qwen3-30B)
 } as const;
 
 // ── God wallet addresses ─────────────────────────────────────────────────────
