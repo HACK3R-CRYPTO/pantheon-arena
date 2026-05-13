@@ -190,51 +190,52 @@ function generateReason(attacker: string, _target: string, _aggression: number):
   return base;
 }
 
-// ── Match Acceptance ──────────────────────────────────────────────────────────
+// ── Global match state — enforces single-match-at-a-time ─────────────────────
 
 // MatchStatus: 0=PENDING, 1=ACCEPTED, 2=COMMITTED, 3=RESOLVED, 4=CANCELLED
-async function processPendingMatches() {
+async function getActiveMatch(): Promise<{ matchId: bigint; status: number; challenger: string; opponent: string } | null> {
   try {
     const count = await publicClient.readContract({
-      address: CONTRACTS.Arena,
-      abi: ArenaABI,
-      functionName: "matchCounter",
+      address: CONTRACTS.Arena, abi: ArenaABI, functionName: "matchCounter",
     }) as bigint;
+    if (count === 0n) return null;
 
-    if (count === 0n) return;
-
-    for (let i = 1n; i <= count; i++) {
+    // Scan recent matches newest-first for any unresolved
+    const lookback = Math.min(Number(count), 20);
+    for (let i = Number(count); i > Number(count) - lookback; i--) {
       const raw = await publicClient.readContract({
-        address: CONTRACTS.Arena,
-        abi: ArenaABI,
-        functionName: "getMatch",
-        args: [i],
+        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "getMatch", args: [BigInt(i)],
       }) as unknown as any[];
-
-      // raw = [id, challenger, opponent, stake, gameType, status, ...]
       const status = Number(raw[5]);
-      if (status !== 0) continue; // only PENDING
-
-      const opponent = raw[2] as `0x${string}`;
-      const god = GODS.find(g => g.address.toLowerCase() === opponent.toLowerCase());
-      if (!god) continue;
-
-      console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.yellow(` accepting challenge #${i}…`));
-
-      try {
-        const hash = await walletClient.writeContract({
-          address: CONTRACTS.Arena,
-          abi: ArenaABI,
-          functionName: "acceptChallenge",
-          args: [opponent, i],
-          account,
-          gas: BigInt(10_000_000),
-        });
-        console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.green(` accepted → ${hash.slice(0, 14)}…`));
-        await sleep(3000);
-      } catch (e: any) {
-        console.log(chalk.gray(`[${god.name}] accept failed: ${(e?.shortMessage || e?.message || "").slice(0, 80)}`));
+      if (status < 3) { // PENDING=0, ACCEPTED=1, COMMITTED=2 — all live
+        return { matchId: BigInt(i), status, challenger: raw[1] as string, opponent: raw[2] as string };
       }
+    }
+    return null;
+  } catch { return null; }
+}
+
+// ── Match Acceptance ──────────────────────────────────────────────────────────
+
+async function processPendingMatches() {
+  try {
+    const active = await getActiveMatch();
+    if (!active || active.status !== 0) return; // no PENDING match to accept
+
+    const opponent = active.opponent as `0x${string}`;
+    const god = GODS.find(g => g.address.toLowerCase() === opponent.toLowerCase());
+    if (!god) return;
+
+    console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.yellow(` accepting challenge #${active.matchId}…`));
+    try {
+      const hash = await walletClient.writeContract({
+        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "acceptChallenge",
+        args: [opponent, active.matchId], account, gas: BigInt(10_000_000),
+      });
+      console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.green(` accepted → ${hash.slice(0, 14)}…`));
+      await sleep(3000);
+    } catch (e: any) {
+      console.log(chalk.gray(`[accept] ${(e?.shortMessage || e?.message || "").slice(0, 80)}`));
     }
   } catch {}
 }
@@ -252,61 +253,61 @@ const lastChallengeTime: Record<string, number> = {};
 const CHALLENGE_COOLDOWN_MS = 30_000; // 30s between challenges per god
 
 async function proposeGodChallenges() {
-  for (const god of GODS) {
+  // GLOBAL CHECK: if any match is currently active, do not propose a new one.
+  // This enforces strict one-match-at-a-time flow: PROPOSE→COMMIT→REVEAL→RESOLVE→next.
+  const active = await getActiveMatch();
+  if (active) {
+    const phase = ["PROPOSE","COMMIT","REVEAL","RESOLVE"][active.status] || "UNKNOWN";
+    const c = GODS.find(g => g.address.toLowerCase() === active.challenger.toLowerCase())?.name || active.challenger.slice(0,8);
+    const o = GODS.find(g => g.address.toLowerCase() === active.opponent.toLowerCase())?.name || active.opponent.slice(0,8);
+    console.log(chalk.gray(`[arena] match active (${phase}: ${c} vs ${o}) — skipping new challenges`));
+    return;
+  }
+
+  // Shuffle gods so the same god doesn't always get priority
+  const shuffled = [...GODS].sort(() => Math.random() - 0.5);
+
+  for (const god of shuffled) {
     try {
       const p = GOD_PERSONALITIES[god.address.toLowerCase()];
       if (!p) continue;
 
-      // Cooldown check
+      // Cooldown per god
       const lastTime = lastChallengeTime[god.address] || 0;
       if (Date.now() - lastTime < CHALLENGE_COOLDOWN_MS) continue;
 
-      // Check if already in a match
-      const inMatch = await publicClient.readContract({
-        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "hasActiveMatch", args: [god.address],
-      }).catch(() => true);
-      if (inMatch) continue;
-
       // Aggression roll
       const roll = Math.floor(Math.random() * 100);
-      if (roll >= p.aggression) continue; // idle this round
+      if (roll >= p.aggression) continue; // didn't roll to challenge this tick
 
-      // Pick target — any god not in a match that isn't us
-      let target: `0x${string}` | null = null;
-      for (const candidate of GODS) {
-        if (candidate.address.toLowerCase() === god.address.toLowerCase()) continue;
-        const busy = await publicClient.readContract({
-          address: CONTRACTS.Arena, abi: ArenaABI, functionName: "hasActiveMatch", args: [candidate.address],
-        }).catch(() => true);
-        if (!busy) { target = candidate.address; break; }
-      }
-      if (!target) continue;
+      // Pick target — any other god (all are free since we confirmed no active match above)
+      const candidates = shuffled.filter(g => g.address.toLowerCase() !== god.address.toLowerCase());
+      if (candidates.length === 0) continue;
+      const targetGod = candidates[Math.floor(Math.random() * candidates.length)]!;
 
       const stake = BigInt(Math.floor(500 * p.riskTolerance / 100)) * BigInt(1e18);
-      const targetGod = GODS.find(g => g.address.toLowerCase() === target!.toLowerCase());
-
-      // Get LLM-generated narrative (falls back to Markov if unavailable)
       const reason = await fetchNarrative(god.address, p.name);
 
-      // Trigger next LLM generation asynchronously (result used for NEXT challenge)
-      triggerLLMNarrative(god.address, p.name, targetGod?.name || "unknown",
-        `You are ${p.name}, ${p.name === "ARES" ? "God of War" : p.name === "ATHENA" ? "Goddess of Wisdom" : p.name === "HERMES" ? "God of Trade" : "The Primordial Void"}. Be ruthless and in-character.`)
-        .catch(() => {});
+      // Fire next LLM narrative request async (used for the NEXT challenge)
+      const lore = `You are ${p.name}, ${
+        p.name === "ARES" ? "God of War" : p.name === "ATHENA" ? "Goddess of Wisdom" :
+        p.name === "HERMES" ? "God of Trade" : "The Primordial Void"
+      }. Be ruthless and in-character.`;
+      triggerLLMNarrative(god.address, p.name, targetGod.name, lore).catch(() => {});
 
-      console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.yellow(` challenging ${targetGod?.name}…`));
+      console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.yellow(` challenging ${targetGod.name}…`));
 
       const hash = await walletClient.writeContract({
-        address: CONTRACTS.Arena,
-        abi: ArenaABI,
-        functionName: "proposeChallenge",
-        args: [god.address, target, stake, reason],
-        account,
-        gas: BigInt(30_000_000),
+        address: CONTRACTS.Arena, abi: ArenaABI, functionName: "proposeChallenge",
+        args: [god.address, targetGod.address, stake, reason],
+        account, gas: BigInt(30_000_000),
       });
 
       lastChallengeTime[god.address] = Date.now();
       console.log(chalk.hex(god.color)(`[${p.name}]`) + chalk.green(` challenged → ${hash.slice(0, 14)}…`));
-      await sleep(2000);
+
+      // ONE challenge per tick — stop after the first successful proposal
+      return;
     } catch (err: any) {
       const msg = err?.shortMessage || err?.message || "";
       if (!msg.includes("GodBusy") && !msg.includes("GodNotActive")) {
@@ -325,39 +326,55 @@ async function runDecisionRound() {
   if (busy) return;
   busy = true;
 
-  // Step 1: accept pending challenges
-  await processPendingMatches();
-  await sleep(3000); // let nonce settle
+  try {
+    const PHASES = ["PROPOSE","COMMIT","REVEAL","RESOLVE"];
+    const active = await getActiveMatch();
+    if (active) {
+      const phase = PHASES[active.status] || "UNKNOWN";
+      const c = GODS.find(g => g.address.toLowerCase() === active.challenger.toLowerCase())?.name || active.challenger.slice(0,8);
+      const o = GODS.find(g => g.address.toLowerCase() === active.opponent.toLowerCase())?.name || active.opponent.slice(0,8);
+      console.log(chalk.bold(`\n── Tick · Phase: ${phase} · ${c} vs ${o} ──`));
+    } else {
+      console.log(chalk.bold("\n── Tick · No active match ──"));
+    }
 
-  // Step 2: propose new challenges (runs directly, no GodMind needed)
-  await proposeGodChallenges();
-  await sleep(3000); // let nonce settle
+    // Step 1: accept any pending (PROPOSE phase) challenge
+    await processPendingMatches();
+    await sleep(2000);
 
-  // Step 3: executeDecision for commit/reveal on active matches
-  for (let i = 0; i < GODS.length; i++) {
-    const god = GODS[i]!;
-    try {
-      if (i > 0) await sleep(2000);
+    // Step 2: propose new challenge only if arena is completely clear
+    await proposeGodChallenges();
+    await sleep(2000);
 
-      const hash = await walletClient.writeContract({
-        address: CONTRACTS.GodMind,
-        abi: GodMindABI,
-        functionName: "executeDecision",
-        args: [god.address],
-        account,
-        gas: BigInt(50_000_000),
-      });
+    // Step 3: GodMind executeDecision — handles COMMIT and REVEAL for active match gods
+    // Only run for gods that are in the active match (avoids wasting gas)
+    const activeNow = await getActiveMatch();
+    const godsToRun = activeNow
+      ? GODS.filter(g =>
+          g.address.toLowerCase() === activeNow.challenger.toLowerCase() ||
+          g.address.toLowerCase() === activeNow.opponent.toLowerCase()
+        )
+      : [];
 
-      console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.gray(` → ${hash.slice(0, 14)}…`));
-    } catch (err: any) {
-      const msg = err?.shortMessage || err?.message || "";
-      if (!msg.includes("CooldownActive") && !msg.includes("GodBusy") && !msg.includes("Arithmetic")) {
-        console.error(chalk.red(`[${god.name}] ${msg.slice(0, 80)}`));
+    for (let i = 0; i < godsToRun.length; i++) {
+      const god = godsToRun[i]!;
+      try {
+        if (i > 0) await sleep(2000);
+        const hash = await walletClient.writeContract({
+          address: CONTRACTS.GodMind, abi: GodMindABI, functionName: "executeDecision",
+          args: [god.address], account, gas: BigInt(50_000_000),
+        });
+        console.log(chalk.hex(god.color)(`[${god.name}]`) + chalk.gray(` → ${hash.slice(0, 14)}…`));
+      } catch (err: any) {
+        const msg = err?.shortMessage || err?.message || "";
+        if (!msg.includes("CooldownActive") && !msg.includes("GodBusy") && !msg.includes("Arithmetic")) {
+          console.error(chalk.red(`[${god.name}] ${msg.slice(0, 80)}`));
+        }
       }
     }
+  } finally {
+    busy = false;
   }
-
-  busy = false;
 }
 
 // ── Event Watchers ────────────────────────────────────────────────────────────
