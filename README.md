@@ -275,9 +275,15 @@ Because `_requestETHPrice` sits inside the era-advance branch of `_onEvent`, tha
 
 The fix was a single owner-only transaction. `WorldState` exposes `setAgentConfig(address platform, uint256 agentId)` for exactly this case. We called it with the correct universal platform address, `0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776`, which is the same contract the LLM agent routes through. Tx [`0x6eadc4d3…`](https://shannon-explorer.somnia.network/tx/0x6eadc4d3115a654be93d1b2bc1726b4f3d71999b96a03799dfa2f892d5a19b77). No contract redeploy. The reactive subscription stayed intact.
 
-The next match that resolved unfroze the era. `_onEvent` advanced `totalBattles` from 49 to 50. The era-advance branch fired. `_requestETHPrice` succeeded. Validators called `handlePriceResponse`. `pendingPriceRequestId` reset to 0 because the callback consumed it. `era` advanced from 1 to 2. `lastPriceFetchBattle` recorded as 50. The chain is now climbing past `totalBattles=53` and growing every match.
+The next match that resolved unfroze the era. `_onEvent` advanced `totalBattles` from 49 to 50. The era-advance branch fired. `_requestETHPrice` succeeded. Validators called `handlePriceResponse`. `pendingPriceRequestId` reset to 0 because the callback consumed it. `era` advanced from 1 to 2. `lastPriceFetchBattle` recorded as 50. The chain is climbing past `totalBattles=66` and growing one battle at a time as each new `MatchResolved` arrives.
 
 The takeaway is that `0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776` is the single universal agent platform on Somnia. All three base agents route through it. Only the `agent_id` distinguishes which capability the call targets. If you copy an address from older docs or repo snippets that says otherwise, it will silently fail with the same error we hit.
+
+#### Counter divergence
+
+`Arena.matchCounter` and `WorldState.totalBattles` are not the same number, and that is intentional. `matchCounter` increments on every match Arena creates. `totalBattles` increments only when `WorldState._onEvent` completes successfully. During the wrong-platform period, the reactive subscription faithfully delivered every `MatchResolved` event, but our handler reverted at the era-advance branch on each one. Those matches are recorded on Arena and on the explorer, but they did not pass through `_onEvent`. WorldState's history starts at the moment we shipped the platform fix.
+
+The era counter therefore reflects validated callbacks, not raw match volume. `era` advances every 50 successful `_onEvent` calls. Arena can show 389+ matches while WorldState shows 66 and `era=2`. Both are correct readings of two different things.
 
 ### What this means for the architecture
 
@@ -333,6 +339,10 @@ cd contracts && forge test --gas-report
 ```
 
 GitHub Actions runs `forge build`, `forge test`, and `bun build` on every push.
+
+## Acknowledgements
+
+Thanks to **emrey.somi** from the Somnia team for two debugging assists that unlocked both agent integrations. First on the LLM Inference Agent, confirming validators need `floor + (0.07 STT * 3)` per request instead of just the platform floor. Then on the JSON API Agent, pointing out that the platform contract we had hardcoded was stale and identifying the correct universal address. Both fixes shipped on the same day; both integrations now write consensus-validated results on chain.
 
 ---
 
