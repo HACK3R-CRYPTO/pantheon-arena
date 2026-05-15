@@ -253,24 +253,35 @@ The engagement number on the hero bar always reflects the match currently on scr
 
 ## Testnet Status (Shannon)
 
-All three Somnia base agents and the reactive subscription are operational on chain. You can verify each below.
+All three Somnia base agents and the reactive subscription are operational on chain. The path to that state is worth documenting, because the two configuration issues we hit are exactly the kind that other teams building on the Agentic L1 will run into.
 
-| Primitive | State | On-chain proof |
-|---|---|---|
-| **Arena, GodRegistry, GodMind, PantheonToken** | Working | 375+ matches resolved on Shannon. Live `matchCounter` on the explorer. |
-| **Reactive Contracts** (`SomniaEventHandler`) | Working | Subscription `#90327` fires `WorldState._onEvent` in the same block as `Arena.MatchResolved`. `totalBattles` advances every match. |
-| **LLM Inference Agent** (Qwen3-30B) | Working | `NarratorAgent.totalGenerated` ≥ 1. First Qwen3 narrative landed via tx [`0x062da7c…`](https://shannon-explorer.somnia.network/tx/0x062da7c71a191e15e468e58404fb12c4173eb55abfbfbbb8ffdbf266be56c3b5). Deposit calculated as `floor + (0.07 STT * 3)` for the 3-validator quorum. |
-| **JSON API Agent** (ETH price oracle) | Working | First era boundary at `totalBattles=50` triggered `_requestETHPrice`, validators called `handlePriceResponse` back, `era` advanced from 1 to 2. `lastPriceFetchBattle=50` recorded. |
+### Reactive Contracts (`SomniaEventHandler`)
 
-### One configuration fix that unlocked the era system
+`WorldState` holds an active reactive subscription, `#90327`, confirmed at block `380497247`. It subscribes to `Arena.MatchResolved`. When a match resolves, Somnia validators call `WorldState._onEvent` in the same block. No keeper wallet, no cron job, no off-chain process. The callback decodes the event topics, increments `totalBattles`, appends to the battle feed ring buffer, and runs the era-advance branch every 50 battles. 375+ matches have flowed through this path on Shannon. The subscription has stayed intact across every fix described below.
 
-The first build pinned `WorldState.agentPlatform` to `0x7407cb35…`, an outdated address. Every `_requestETHPrice` call reverted with `"AgentRequester: not enough active members"`. Because the call sits inside the era-advance branch of `_onEvent`, the entire reactive callback reverted at battle 50. `totalBattles` froze at 49, `era` froze at 1.
+### LLM Inference Agent (Qwen3-30B)
 
-The fix was a single owner-only call to `setAgentConfig(0x037Bb9C7…, 13174292974160097713)`. Tx [`0x6eadc4d3…`](https://shannon-explorer.somnia.network/tx/0x6eadc4d3115a654be93d1b2bc1726b4f3d71999b96a03799dfa2f892d5a19b77). No redeploy. The reactive subscription stayed intact. The next match that resolved unfroze the chain.
+`NarratorAgent` calls the LLM Inference Agent (agent ID `12847293847561029384`) on every challenge. The initial build sent only `PLATFORM.getRequestDeposit()` as the deposit, around 0.03 STT, which is the operations-reserve floor returned by the platform. The contract was correct, the wiring was correct, and the platform accepted the request. But validators never delivered a consensus response back to `handleResponse`. `NarratorAgent.totalGenerated` stayed at 0 for hours.
 
-`0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776` is the single universal agent platform on Somnia. All three base agents route through it; only the `agent_id` distinguishes them.
+The Somnia team confirmed why. Validators silently skip requests below a per-agent budget threshold. For the LLM Inference Agent, that threshold is 0.07 STT per validator, and the agent uses a 3-validator quorum. The real deposit needs to be `floor + (0.07 STT * 3)`, around 0.24 STT. The redeploy was simple in code, three lines, but it required a new `NarratorAgent` address because Solidity constants are immutable.
 
-The same engineering principle drives the spectator client. When validators are responsive, the green `⬢ QWEN3-30B · ONCHAIN CONSENSUS` badge fires. When they are slow, the off-chain Groq, Gemini hot path keeps the UI alive. The badge always tells the truth about provenance.
+We deployed the new contract at `0x9282048b837b1d3f8e325cdf99c7e31c0163cac3`, funded it with 5 STT (enough for ~20 inferences), and fired one `requestNarrative` for ARES challenging ATHENA. Tx [`0x062da7c…`](https://shannon-explorer.somnia.network/tx/0x062da7c71a191e15e468e58404fb12c4173eb55abfbfbbb8ffdbf266be56c3b5). Status success. Validators called `handleResponse` in the same block. `totalGenerated` ticked to 1. The first on-chain Qwen3 narrative landed in `latestNarrative[ARES]`: *"I will carve your pride into the dust, Athena. Prepare to fall."*
+
+### JSON API Agent (ETH price oracle)
+
+`WorldState._requestETHPrice` calls the JSON API Agent (agent ID `13174292974160097713`) every 50 battles to fetch ETH/USD from CoinGecko. This call is the trigger for the in-game world events that shape an entire era of gameplay. The initial build pinned `WorldState.agentPlatform` to `0x7407cb35a17D511D1Bd32dD726ADb8D5344ECbE3` because that address appeared in our deploy script as `SOMNIA_PLATFORM`. We had copied it from an early example. The address is dead. Every call to it reverted with `"AgentRequester: not enough active members"`. We tried deposits of 0.03, 0.24, and 0.5 STT. All reverted with the same error, because the contract on the other side is not a current platform contract at all.
+
+Because `_requestETHPrice` sits inside the era-advance branch of `_onEvent`, that revert cascaded the whole reactive callback. `totalBattles` rolled back to 49. `era` rolled back to 1. The chain kept producing matches in Arena, but `WorldState` froze. The reactive subscription stayed armed and faithfully delivered every `MatchResolved`, but our handler reverted on each one.
+
+The fix was a single owner-only transaction. `WorldState` exposes `setAgentConfig(address platform, uint256 agentId)` for exactly this case. We called it with the correct universal platform address, `0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776`, which is the same contract the LLM agent routes through. Tx [`0x6eadc4d3…`](https://shannon-explorer.somnia.network/tx/0x6eadc4d3115a654be93d1b2bc1726b4f3d71999b96a03799dfa2f892d5a19b77). No contract redeploy. The reactive subscription stayed intact.
+
+The next match that resolved unfroze the era. `_onEvent` advanced `totalBattles` from 49 to 50. The era-advance branch fired. `_requestETHPrice` succeeded. Validators called `handlePriceResponse`. `pendingPriceRequestId` reset to 0 because the callback consumed it. `era` advanced from 1 to 2. `lastPriceFetchBattle` recorded as 50. The chain is now climbing past `totalBattles=53` and growing every match.
+
+The takeaway is that `0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776` is the single universal agent platform on Somnia. All three base agents route through it. Only the `agent_id` distinguishes which capability the call targets. If you copy an address from older docs or repo snippets that says otherwise, it will silently fail with the same error we hit.
+
+### What this means for the architecture
+
+The same engineering principle drives the spectator client. When validators are responsive, the green `⬢ QWEN3-30B · ONCHAIN CONSENSUS` badge fires on the narrator strip. When they are slow, the off-chain Groq, Gemini hot path keeps the UI alive in under 200ms. The badge always tells the truth about provenance. The fix story for the JSON API path follows the same principle on the contract side. We did not redeploy. We did not break the reactive subscription. We used a configuration setter that was designed exactly for this case and validated the fix on chain before claiming it works.
 
 ## Running Locally
 
