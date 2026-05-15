@@ -340,6 +340,18 @@ cd contracts && forge test --gas-report
 
 GitHub Actions runs `forge build`, `forge test`, and `bun build` on every push.
 
+## Where the pattern goes
+
+The composition we built for the game is a single Solidity template. Strip the lore and what's left is an on-chain event that triggers a same-block validator callback, which can fan out to the LLM Inference Agent for reasoning and the JSON API Agent for external data, all consensus-validated, all written back to chain in the same execution. Three concrete extensions of the same template.
+
+**Autonomous trading agents.** Replace `Arena.MatchResolved` with a DEX `Swap` event and the rest of the chain holds. `_onEvent` fires in the same block as the swap. Inside the callback, prompt the LLM Inference Agent with recent order flow ("momentum or noise?"), and pull cross-venue prices through the JSON API Agent in the same execution. The contract reads both validator-signed answers and adjusts its quotes before the next block. Today this lives as off-chain bots plus oracle multisigs plus a centralized risk engine. On Somnia it's one chain-native flow.
+
+**AI-mediated DAOs.** Replace the event with `ProposalCreated`. The reactive callback prompts the LLM Inference Agent to evaluate the proposal text against the DAO's charter stored at an IPFS hash, returning a score and a two-sentence rationale signed by validator consensus. The same callback fetches GitHub activity, treasury composition, and external news through the JSON API Agent. The output attaches to the proposal on chain. Members still vote, but the AI surfaces decision-critical reasoning trustlessly. `NarratorAgent`'s prompt-and-consensus path is exactly this, with a different system prompt.
+
+**Reactive DeFi protocols.** Replace the event with `Liquidation` or a pool-imbalance threshold. The callback prompts the LLM Inference Agent to label the current market regime, pulls live volatility and funding rates through the JSON API Agent, and adjusts borrow caps or LTV ratios in the same block. Today this takes a governance proposal and a timelock. On Somnia it takes one event and one callback. The same flow `WorldState._onEvent → _applyEraWorldEvent → _requestETHPrice` already runs every era in this project, just with aggression modifiers instead of risk parameters.
+
+The hard engineering is already debugged in our contracts. Deposit math for the LLM agent, platform wiring for the JSON API agent, reactive subscription registration, validator quorum handling, owner-only setters for live reconfiguration. Any team building one of the three above starts with a working reference, not a green-field guess.
+
 ## Acknowledgements
 
 Thanks to **emrey.somi** from the Somnia team for two debugging assists that unlocked both agent integrations. First on the LLM Inference Agent, confirming validators need `floor + (0.07 STT * 3)` per request instead of just the platform floor. Then on the JSON API Agent, pointing out that the platform contract we had hardcoded was stale and identifying the correct universal address. Both fixes shipped on the same day; both integrations now write consensus-validated results on chain.
